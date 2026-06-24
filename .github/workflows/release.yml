@@ -19,15 +19,19 @@ jobs:
           - target: macos-arm64
             runner: macos-latest
             bun_target: ""
+            can_smoke_test: true
           - target: linux-x64
             runner: ubuntu-latest
             bun_target: "--target=bun-linux-x64"
+            can_smoke_test: true
           - target: linux-arm64
             runner: ubuntu-24.04-arm
             bun_target: "--target=bun-linux-arm64"
+            can_smoke_test: true # Supported natively because it runs on an ARM runner
           - target: windows-x64
             runner: ubuntu-latest
             bun_target: "--target=bun-windows-x64"
+            can_smoke_test: false
 
     steps:
       - name: Checkout
@@ -61,7 +65,7 @@ jobs:
           fi
 
       - name: Smoke test Unix binary
-        if: matrix.target != 'windows-x64'
+        if: matrix.can_smoke_test == true
         shell: bash
         run: |
           dist/qcp-${{ matrix.target }} --version
@@ -73,12 +77,12 @@ jobs:
           path: dist/qcp-${{ matrix.target }}*
 
   release:
-    name: Create Release
+    name: Create Release & Update Tap Formula
     needs: build
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout Source Code
         uses: actions/checkout@v4
 
       - name: Download all artifacts
@@ -87,19 +91,47 @@ jobs:
           path: dist/
           merge-multiple: true
 
-      - name: List artifacts
-        run: ls -lh dist/
+      - name: Checkout Homebrew Tap Repo
+        uses: actions/checkout@v4
+        with:
+          repository: 'Moduna-AI/homebrew-qcp'
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }} # External PAT with write access to the tap repo
+          path: 'tap-repo'
 
-      - name: Compute SHA256 checksums
-        id: checksums
+      - name: Compute Checksums and Update Remote Tap Formula
+        shell: bash
         run: |
+          # 1. Compute the checksums locally inside the dist folder
           cd dist
           sha256sum qcp-* > checksums.txt
           cat checksums.txt
+          
+          SHA_MAC_ARM64=$(sha256sum qcp-macos-arm64 | awk '{print $1}')
+          SHA_LINUX_X64=$(sha256sum qcp-linux-x64 | awk '{print $1}')
+          SHA_LINUX_ARM64=$(sha256sum qcp-linux-arm64 | awk '{print $1}')
+          cd .. # Move back to workspace root
 
-          echo "sha256_macos_arm64=$(sha256sum qcp-macos-arm64 | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-          echo "sha256_linux_x64=$(sha256sum qcp-linux-x64 | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-          echo "sha256_linux_arm64=$(sha256sum qcp-linux-arm64 | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          # 2. Define path to the checked-out tap formula
+          FORMULA_PATH="tap-repo/Formula/qcp.rb"
+          
+          if [ -f "$FORMULA_PATH" ]; then
+            # 3. Use standard local shell variable substitution (safe from GH context errors)
+            sed -i "s/PLACEHOLDER_SHA256_MACOS_ARM64/${SHA_MAC_ARM64}/g" $FORMULA_PATH
+            sed -i "s/PLACEHOLDER_SHA256_LINUX_X64/${SHA_LINUX_X64}/g" $FORMULA_PATH
+            sed -i "s/PLACEHOLDER_SHA256_LINUX_ARM64/${SHA_LINUX_ARM64}/g" $FORMULA_PATH
+            
+            # 4. Commit and push directly to the standalone tap repo
+            cd tap-repo
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git add Formula/qcp.rb
+            git commit -m "chore: update qcp formula checksums for ${GITHUB_REF#refs/tags/}"
+            git push origin main
+            cd ..
+          else
+            echo "Error: Formula file not found at $FORMULA_PATH!"
+            exit 1
+          fi
 
       - name: Extract version
         id: version
@@ -118,6 +150,8 @@ jobs:
             dist/qcp-linux-arm64
             dist/qcp-windows-x64.exe
             dist/checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   npm-publish:
     name: Publish to npm
