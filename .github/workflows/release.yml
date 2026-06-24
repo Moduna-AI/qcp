@@ -115,18 +115,24 @@ jobs:
           FORMULA_PATH="tap-repo/Formula/qcp.rb"
           
           if [ -f "$FORMULA_PATH" ]; then
-            # 3. Use standard local shell variable substitution (safe from GH context errors)
-            sed -i "s/PLACEHOLDER_SHA256_MACOS_ARM64/${SHA_MAC_ARM64}/g" $FORMULA_PATH
-            sed -i "s/PLACEHOLDER_SHA256_LINUX_X64/${SHA_LINUX_X64}/g" $FORMULA_PATH
-            sed -i "s/PLACEHOLDER_SHA256_LINUX_ARM64/${SHA_LINUX_ARM64}/g" $FORMULA_PATH
+            # 3. Smart Regex Replacement: Find the line with the binary name, 
+            # go to the next line (n), and swap out whatever sha256 is currently there.
+            sed -i "/qcp-macos-arm64/{n;s/sha256 \".*\"/sha256 \"${SHA_MAC_ARM64}\"/}" $FORMULA_PATH
+            sed -i "/qcp-linux-x64/{n;s/sha256 \".*\"/sha256 \"${SHA_LINUX_X64}\"/}" $FORMULA_PATH
+            sed -i "/qcp-linux-arm64/{n;s/sha256 \".*\"/sha256 \"${SHA_LINUX_ARM64}\"/}" $FORMULA_PATH
             
-            # 4. Commit and push directly to the standalone tap repo
+            # 4. Commit and push modifications safely
             cd tap-repo
             git config --global user.name "github-actions[bot]"
             git config --global user.email "github-actions[bot]@users.noreply.github.com"
             git add Formula/qcp.rb
-            git commit -m "chore: update qcp formula checksums for ${GITHUB_REF#refs/tags/}"
-            git push origin main
+            
+            if ! git diff --cached --quiet; then
+              git commit -m "chore: update qcp formula checksums for ${GITHUB_REF#refs/tags/}"
+              git push origin main
+            else
+              echo "Formula checksums are already identical. Skipping commit."
+            fi
             cd ..
           else
             echo "Error: Formula file not found at $FORMULA_PATH!"
