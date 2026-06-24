@@ -1,168 +1,191 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
-import { join } from 'path';
-import { z } from 'zod';
-import { v7 as uuidv7 } from 'uuid';
-import type { QcpConfig, ProviderName } from '../types/index.js';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { v7 as uuidv7 } from "uuid";
+import { z } from "zod";
+import type { ProviderName, QcpConfig } from "../types/index.js";
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
 
-export const QCP_HOME = join(homedir(), '.qcp');
-export const CONFIG_PATH = join(QCP_HOME, 'config.json');
-export const LOGS_DIR = join(QCP_HOME, 'logs');
-export const LOCAL_QCP_DIR = '.qcp';
-export const LOCAL_SCHEMA_PATH = join(LOCAL_QCP_DIR, 'schema.json');
-export const LOCAL_SUPPORT_DIR = join(LOCAL_QCP_DIR, 'support');
+export const QCP_HOME = join(homedir(), ".qcp");
+export const CONFIG_PATH = join(QCP_HOME, "config.json");
+export const LOGS_DIR = join(QCP_HOME, "logs");
+export const LOCAL_QCP_DIR = ".qcp";
+export const LOCAL_SCHEMA_PATH = join(LOCAL_QCP_DIR, "schema.json");
+export const LOCAL_SUPPORT_DIR = join(LOCAL_QCP_DIR, "support");
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
 const ApiKeysSchema = z.object({
-  gemini: z.string().optional(),
-  openai: z.string().optional(),
-  anthropic: z.string().optional(),
+	gemini: z.string().optional(),
+	openai: z.string().optional(),
+	anthropic: z.string().optional(),
 });
 
 const QcpConfigSchema = z.object({
-  version: z.string().default('0.1.0'),
-  installId: z.string().default(() => uuidv7()),
-  databaseUrl: z.string().optional(),
-  provider: z.enum(['gemini', 'openai', 'anthropic', 'ollama']).default('gemini'),
-  model: z.string().default('gemini-2.5-flash'),
-  telemetry: z.boolean().default(true),
-  safeMode: z.boolean().default(true),
-  showSql: z.boolean().default(true),
-  showMetrics: z.boolean().default(false),
-  sensitiveTablePatterns: z.array(z.string()).default([
-    'user', 'customer', 'payment', 'billing', 'payroll',
-    'employee', 'password', 'token', 'secret', 'credential',
-  ]),
-  ollamaHost: z.string().optional(),
-  apiKeys: ApiKeysSchema.default({}),
+	version: z.string().default("0.1.0"),
+	installId: z.string().default(() => uuidv7()),
+	databaseUrl: z.string().optional(),
+	provider: z
+		.enum(["gemini", "openai", "anthropic", "ollama"])
+		.default("gemini"),
+	model: z.string().default("gemini-2.5-flash"),
+	telemetry: z.boolean().default(true),
+	safeMode: z.boolean().default(true),
+	showSql: z.boolean().default(true),
+	showMetrics: z.boolean().default(false),
+	sensitiveTablePatterns: z
+		.array(z.string())
+		.default([
+			"user",
+			"customer",
+			"payment",
+			"billing",
+			"payroll",
+			"employee",
+			"password",
+			"token",
+			"secret",
+			"credential",
+		]),
+	ollamaHost: z.string().optional(),
+	apiKeys: ApiKeysSchema.default({}),
 });
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 
 export const DEFAULT_MODELS: Record<ProviderName, string> = {
-  gemini: 'gemini-2.5-flash',
-  openai: 'gpt-4o',
-  anthropic: 'claude-opus-4-5',
-  ollama: 'qwen3',
+	gemini: "gemini-2.5-flash",
+	openai: "gpt-4o",
+	anthropic: "claude-opus-4-5",
+	ollama: "qwen3",
 };
 
 export const AVAILABLE_MODELS: Record<ProviderName, string[]> = {
-  gemini: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-pro', 'gemini-1.5-flash'],
-  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1-mini'],
-  anthropic: ['claude-opus-4-5', 'claude-sonnet-4-5', 'claude-haiku-4-5'],
-  ollama: ['qwen3', 'llama3', 'mistral', 'codellama', 'phi3'],
+	gemini: [
+		"gemini-2.5-flash",
+		"gemini-2.5-pro",
+		"gemini-1.5-pro",
+		"gemini-1.5-flash",
+	],
+	openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1-mini"],
+	anthropic: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5"],
+	ollama: ["qwen3", "llama3", "mistral", "codellama", "phi3"],
 };
 
 // ─── Read / Write ──────────────────────────────────────────────────────────────
 
 export function ensureConfigDir(): void {
-  if (!existsSync(QCP_HOME)) {
-    mkdirSync(QCP_HOME, { recursive: true });
-  }
-  if (!existsSync(LOGS_DIR)) {
-    mkdirSync(LOGS_DIR, { recursive: true });
-  }
+	if (!existsSync(QCP_HOME)) {
+		mkdirSync(QCP_HOME, { recursive: true });
+	}
+	if (!existsSync(LOGS_DIR)) {
+		mkdirSync(LOGS_DIR, { recursive: true });
+	}
 }
 
 export function configExists(): boolean {
-  return existsSync(CONFIG_PATH);
+	return existsSync(CONFIG_PATH);
 }
 
 export function loadConfig(): QcpConfig {
-  ensureConfigDir();
+	ensureConfigDir();
 
-  if (!existsSync(CONFIG_PATH)) {
-    return createDefaultConfig();
-  }
+	if (!existsSync(CONFIG_PATH)) {
+		return createDefaultConfig();
+	}
 
-  try {
-    const raw = readFileSync(CONFIG_PATH, 'utf-8');
-    const parsed = JSON.parse(raw);
-    const result = QcpConfigSchema.safeParse(parsed);
-    if (!result.success) {
-      console.warn('Config validation warning; using defaults for invalid fields.');
-      return QcpConfigSchema.parse({ ...parsed });
-    }
-    return result.data as QcpConfig;
-  } catch {
-    return createDefaultConfig();
-  }
+	try {
+		const raw = readFileSync(CONFIG_PATH, "utf-8");
+		const parsed = JSON.parse(raw);
+		const result = QcpConfigSchema.safeParse(parsed);
+		if (!result.success) {
+			console.warn(
+				"Config validation warning; using defaults for invalid fields.",
+			);
+			return QcpConfigSchema.parse({ ...parsed });
+		}
+		return result.data as QcpConfig;
+	} catch {
+		return createDefaultConfig();
+	}
 }
 
 export function saveConfig(config: Partial<QcpConfig>): QcpConfig {
-  ensureConfigDir();
-  const current = configExists() ? loadConfig() : createDefaultConfig();
-  const merged = { ...current, ...config };
-  const validated = QcpConfigSchema.parse(merged) as QcpConfig;
-  writeFileSync(CONFIG_PATH, JSON.stringify(validated, null, 2));
-  return validated;
+	ensureConfigDir();
+	const current = configExists() ? loadConfig() : createDefaultConfig();
+	const merged = { ...current, ...config };
+	const validated = QcpConfigSchema.parse(merged) as QcpConfig;
+	writeFileSync(CONFIG_PATH, JSON.stringify(validated, null, 2));
+	return validated;
 }
 
 export function createDefaultConfig(): QcpConfig {
-  const config = QcpConfigSchema.parse({}) as QcpConfig;
-  return config;
+	const config = QcpConfigSchema.parse({}) as QcpConfig;
+	return config;
 }
 
 // ─── Getters / Setters ────────────────────────────────────────────────────────
 
 export function getApiKey(config: QcpConfig): string | undefined {
-  switch (config.provider) {
-    case 'gemini':
-      return config.apiKeys.gemini ?? process.env.GEMINI_API_KEY;
-    case 'openai':
-      return config.apiKeys.openai ?? process.env.OPENAI_API_KEY;
-    case 'anthropic':
-      return config.apiKeys.anthropic ?? process.env.ANTHROPIC_API_KEY;
-    case 'ollama':
-      return 'ollama'; // no key needed
-    default:
-      return undefined;
-  }
+	switch (config.provider) {
+		case "gemini":
+			return config.apiKeys.gemini ?? process.env.GEMINI_API_KEY;
+		case "openai":
+			return config.apiKeys.openai ?? process.env.OPENAI_API_KEY;
+		case "anthropic":
+			return config.apiKeys.anthropic ?? process.env.ANTHROPIC_API_KEY;
+		case "ollama":
+			return "ollama"; // no key needed
+		default:
+			return undefined;
+	}
 }
 
 export function setApiKey(provider: ProviderName, key: string): void {
-  const config = loadConfig();
-  config.apiKeys[provider as keyof typeof config.apiKeys] = key;
-  saveConfig(config);
+	const config = loadConfig();
+	config.apiKeys[provider as keyof typeof config.apiKeys] = key;
+	saveConfig(config);
 }
 
 export function getDatabaseUrl(config: QcpConfig): string | undefined {
-  return config.databaseUrl ?? process.env.DATABASE_URL ?? process.env.QCP_DATABASE_URL;
+	return (
+		config.databaseUrl ??
+		process.env.DATABASE_URL ??
+		process.env.QCP_DATABASE_URL
+	);
 }
 
 // ─── Local project helpers ────────────────────────────────────────────────────
 
 export function ensureLocalDir(): void {
-  if (!existsSync(LOCAL_QCP_DIR)) {
-    mkdirSync(LOCAL_QCP_DIR, { recursive: true });
-  }
+	if (!existsSync(LOCAL_QCP_DIR)) {
+		mkdirSync(LOCAL_QCP_DIR, { recursive: true });
+	}
 }
 
 export function localSchemaExists(): boolean {
-  return existsSync(LOCAL_SCHEMA_PATH);
+	return existsSync(LOCAL_SCHEMA_PATH);
 }
 
 // ─── Redaction (for support bundles) ─────────────────────────────────────────
 
 export function redactConfig(config: QcpConfig): Record<string, unknown> {
-  return {
-    version: config.version,
-    installId: config.installId,
-    provider: config.provider,
-    model: config.model,
-    telemetry: config.telemetry,
-    safeMode: config.safeMode,
-    showSql: config.showSql,
-    showMetrics: config.showMetrics,
-    databaseUrl: config.databaseUrl ? '[REDACTED]' : undefined,
-    apiKeys: {
-      gemini: config.apiKeys.gemini ? '[CONFIGURED]' : undefined,
-      openai: config.apiKeys.openai ? '[CONFIGURED]' : undefined,
-      anthropic: config.apiKeys.anthropic ? '[CONFIGURED]' : undefined,
-    },
-    ollamaHost: config.ollamaHost,
-  };
+	return {
+		version: config.version,
+		installId: config.installId,
+		provider: config.provider,
+		model: config.model,
+		telemetry: config.telemetry,
+		safeMode: config.safeMode,
+		showSql: config.showSql,
+		showMetrics: config.showMetrics,
+		databaseUrl: config.databaseUrl ? "[REDACTED]" : undefined,
+		apiKeys: {
+			gemini: config.apiKeys.gemini ? "[CONFIGURED]" : undefined,
+			openai: config.apiKeys.openai ? "[CONFIGURED]" : undefined,
+			anthropic: config.apiKeys.anthropic ? "[CONFIGURED]" : undefined,
+		},
+		ollamaHost: config.ollamaHost,
+	};
 }

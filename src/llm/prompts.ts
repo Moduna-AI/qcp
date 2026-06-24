@@ -1,9 +1,10 @@
-import { schemaToContext } from '../schema/index.js';
-import type { DatabaseSchema, QueryResult } from '../types/index.js';
+import { schemaToContext } from "../schema/index.js";
+import type { DatabaseSchema, QueryResult } from "../types/index.js";
 
 // ─── System prompts ───────────────────────────────────────────────────────────
 
-export const SQL_SYSTEM_PROMPT = `You are an expert PostgreSQL database analyst for qcp (Query Companion).
+export const SQL_SYSTEM_PROMPT =
+	`You are an expert PostgreSQL database analyst for qcp (Query Companion).
 
 CRITICAL SAFETY RULES — you MUST follow these without exception:
 1. ONLY generate SELECT, WITH (CTEs), or EXPLAIN statements.
@@ -29,10 +30,13 @@ RESPONSE FORMAT — always use this exact format:
 
 // ─── SQL prompt builder ───────────────────────────────────────────────────────
 
-export function buildSqlPrompt(question: string, schema: DatabaseSchema): string {
-  const schemaContext = schemaToContext(schema);
+export function buildSqlPrompt(
+	question: string,
+	schema: DatabaseSchema,
+): string {
+	const schemaContext = schemaToContext(schema);
 
-  return `
+	return `
 DATABASE SCHEMA:
 ${schemaContext}
 
@@ -46,14 +50,14 @@ Generate a safe, read-only PostgreSQL query to answer this question.
 // ─── Summary prompt builder ────────────────────────────────────────────────────
 
 export function buildSummaryPrompt(
-  question: string,
-  sql: string,
-  results: QueryResult
+	question: string,
+	sql: string,
+	results: QueryResult,
 ): string {
-  const previewRows = results.rows.slice(0, 10);
-  const hasMore = results.rowCount > 10;
+	const previewRows = results.rows.slice(0, 10);
+	const hasMore = results.rowCount > 10;
 
-  return `
+	return `
 You are a data analyst. Summarize these query results in natural language.
 
 ORIGINAL QUESTION:
@@ -62,7 +66,7 @@ ${question}
 SQL QUERY:
 ${sql}
 
-RESULTS (${results.rowCount} rows${hasMore ? ', showing first 10' : ''}):
+RESULTS (${results.rowCount} rows${hasMore ? ", showing first 10" : ""}):
 ${JSON.stringify(previewRows, null, 2)}
 
 Write a concise 2-4 sentence summary of what these results show. Be specific with numbers and names from the data. Do not mention SQL or technical details.
@@ -72,35 +76,37 @@ Write a concise 2-4 sentence summary of what these results show. Be specific wit
 // ─── SQL extraction ────────────────────────────────────────────────────────────
 
 export function extractSqlAndExplanation(rawText: string): {
-  sql: string;
-  explanation: string;
+	sql: string;
+	explanation: string;
 } {
-  // Extract SQL from <sql>...</sql>
-  const sqlMatch = rawText.match(/<sql>\s*([\s\S]*?)\s*<\/sql>/i);
-  let sql = sqlMatch ? sqlMatch[1].trim() : '';
+	// Extract SQL from <sql>...</sql>
+	const sqlMatch = rawText.match(/<sql>\s*([\s\S]*?)\s*<\/sql>/i);
+	let sql = sqlMatch ? sqlMatch[1].trim() : "";
 
-  // Fallback: look for a code block
-  if (!sql) {
-    const codeMatch = rawText.match(/```(?:sql)?\s*([\s\S]*?)```/i);
-    sql = codeMatch ? codeMatch[1].trim() : '';
-  }
+	// Fallback: look for a code block
+	if (!sql) {
+		const codeMatch = rawText.match(/```(?:sql)?\s*([\s\S]*?)```/i);
+		sql = codeMatch ? codeMatch[1].trim() : "";
+	}
 
-  // Last resort: try to extract a SELECT statement from the raw text
-  if (!sql) {
-    const selectMatch = rawText.match(/(SELECT[\s\S]*?(?:;|$))/i);
-    sql = selectMatch ? selectMatch[1].trim().replace(/;?\s*$/, '') : '';
-  }
+	// Last resort: try to extract a SELECT statement from the raw text
+	if (!sql) {
+		const selectMatch = rawText.match(/(SELECT[\s\S]*?(?:;|$))/i);
+		sql = selectMatch ? selectMatch[1].trim().replace(/;?\s*$/, "") : "";
+	}
 
-  // Extract explanation from <explanation>...</explanation>
-  const explanationMatch = rawText.match(/<explanation>\s*([\s\S]*?)\s*<\/explanation>/i);
-  const explanation = explanationMatch ? explanationMatch[1].trim() : '';
+	// Extract explanation from <explanation>...</explanation>
+	const explanationMatch = rawText.match(
+		/<explanation>\s*([\s\S]*?)\s*<\/explanation>/i,
+	);
+	const explanation = explanationMatch ? explanationMatch[1].trim() : "";
 
-  if (!sql) {
-    throw new Error(
-      'Could not extract SQL from the model response. ' +
-      'Try rephrasing your question or running with --debug to see the raw output.'
-    );
-  }
+	if (!sql) {
+		throw new Error(
+			"Could not extract SQL from the model response. " +
+				"Try rephrasing your question or running with --debug to see the raw output.",
+		);
+	}
 
-  return { sql, explanation };
+	return { sql, explanation };
 }

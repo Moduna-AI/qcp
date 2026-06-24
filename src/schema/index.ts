@@ -1,24 +1,30 @@
-import postgres from 'postgres';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { LOCAL_SCHEMA_PATH, ensureLocalDir } from '../config/index.js';
-import type { DatabaseSchema, SchemaTable, SchemaColumn, SchemaForeignKey, SchemaIndex } from '../types/index.js';
+import { existsSync, readFileSync, writeFileSync } from "fs";
+import postgres from "postgres";
+import { ensureLocalDir, LOCAL_SCHEMA_PATH } from "../config/index.js";
+import type {
+	DatabaseSchema,
+	SchemaColumn,
+	SchemaForeignKey,
+	SchemaIndex,
+	SchemaTable,
+} from "../types/index.js";
 
 // ─── Schema scanning ──────────────────────────────────────────────────────────
 
 export async function scanSchema(databaseUrl: string): Promise<DatabaseSchema> {
-  const db = postgres(databaseUrl, {
-    max: 2,
-    connect_timeout: 15,
-    connection: { application_name: 'qcp-schema' },
-  });
+	const db = postgres(databaseUrl, {
+		max: 2,
+		connect_timeout: 15,
+		connection: { application_name: "qcp-schema" },
+	});
 
-  try {
-    // Get database name
-    const [dbRow] = await db`SELECT current_database() as name`;
-    const databaseName = (dbRow as { name: string }).name;
+	try {
+		// Get database name
+		const [dbRow] = await db`SELECT current_database() as name`;
+		const databaseName = (dbRow as { name: string }).name;
 
-    // Get all tables (excluding system schemas)
-    const tableRows = await db`
+		// Get all tables (excluding system schemas)
+		const tableRows = await db`
       SELECT
         table_schema,
         table_name
@@ -28,15 +34,15 @@ export async function scanSchema(databaseUrl: string): Promise<DatabaseSchema> {
       ORDER BY table_schema, table_name
     `;
 
-    const tables: SchemaTable[] = [];
+		const tables: SchemaTable[] = [];
 
-    for (const tableRow of tableRows) {
-      const row = tableRow as { table_schema: string; table_name: string };
-      const tableName = row.table_name;
-      const schemaName = row.table_schema;
+		for (const tableRow of tableRows) {
+			const row = tableRow as { table_schema: string; table_name: string };
+			const tableName = row.table_name;
+			const schemaName = row.table_schema;
 
-      // Get columns
-      const columnRows = await db`
+			// Get columns
+			const columnRows = await db`
         SELECT
           c.column_name,
           c.data_type,
@@ -63,30 +69,30 @@ export async function scanSchema(databaseUrl: string): Promise<DatabaseSchema> {
         ORDER BY c.ordinal_position
       `;
 
-      const columns: SchemaColumn[] = columnRows.map((r) => {
-        const cr = r as {
-          column_name: string;
-          data_type: string;
-          is_nullable: string;
-          column_default: string | null;
-          is_primary_key: boolean;
-        };
-        return {
-          name: cr.column_name,
-          type: cr.data_type,
-          nullable: cr.is_nullable === 'YES',
-          defaultValue: cr.column_default ?? undefined,
-          isPrimaryKey: cr.is_primary_key,
-        };
-      });
+			const columns: SchemaColumn[] = columnRows.map((r) => {
+				const cr = r as {
+					column_name: string;
+					data_type: string;
+					is_nullable: string;
+					column_default: string | null;
+					is_primary_key: boolean;
+				};
+				return {
+					name: cr.column_name,
+					type: cr.data_type,
+					nullable: cr.is_nullable === "YES",
+					defaultValue: cr.column_default ?? undefined,
+					isPrimaryKey: cr.is_primary_key,
+				};
+			});
 
-      // Get primary keys
-      const primaryKeys = columns
-        .filter((c) => c.isPrimaryKey)
-        .map((c) => c.name);
+			// Get primary keys
+			const primaryKeys = columns
+				.filter((c) => c.isPrimaryKey)
+				.map((c) => c.name);
 
-      // Get foreign keys
-      const fkRows = await db`
+			// Get foreign keys
+			const fkRows = await db`
         SELECT
           tc.constraint_name,
           kcu.column_name,
@@ -105,25 +111,25 @@ export async function scanSchema(databaseUrl: string): Promise<DatabaseSchema> {
           AND tc.table_name = ${tableName}
       `;
 
-      const foreignKeys: SchemaForeignKey[] = fkRows.map((r) => {
-        const fr = r as {
-          constraint_name: string;
-          column_name: string;
-          foreign_table_schema: string;
-          foreign_table_name: string;
-          foreign_column_name: string;
-        };
-        return {
-          constraintName: fr.constraint_name,
-          column: fr.column_name,
-          referencedTable: fr.foreign_table_name,
-          referencedSchema: fr.foreign_table_schema,
-          referencedColumn: fr.foreign_column_name,
-        };
-      });
+			const foreignKeys: SchemaForeignKey[] = fkRows.map((r) => {
+				const fr = r as {
+					constraint_name: string;
+					column_name: string;
+					foreign_table_schema: string;
+					foreign_table_name: string;
+					foreign_column_name: string;
+				};
+				return {
+					constraintName: fr.constraint_name,
+					column: fr.column_name,
+					referencedTable: fr.foreign_table_name,
+					referencedSchema: fr.foreign_table_schema,
+					referencedColumn: fr.foreign_column_name,
+				};
+			});
 
-      // Get indexes
-      const indexRows = await db`
+			// Get indexes
+			const indexRows = await db`
         SELECT
           i.relname AS index_name,
           ix.indisunique AS is_unique,
@@ -142,25 +148,25 @@ export async function scanSchema(databaseUrl: string): Promise<DatabaseSchema> {
         ORDER BY i.relname
       `;
 
-      const indexes: SchemaIndex[] = indexRows.map((r) => {
-        const ir = r as {
-          index_name: string;
-          is_unique: boolean;
-          is_primary: boolean;
-          columns: string[];
-        };
-        return {
-          name: ir.index_name,
-          columns: ir.columns,
-          unique: ir.is_unique,
-          primary: ir.is_primary,
-        };
-      });
+			const indexes: SchemaIndex[] = indexRows.map((r) => {
+				const ir = r as {
+					index_name: string;
+					is_unique: boolean;
+					is_primary: boolean;
+					columns: string[];
+				};
+				return {
+					name: ir.index_name,
+					columns: ir.columns,
+					unique: ir.is_unique,
+					primary: ir.is_primary,
+				};
+			});
 
-      // Get estimated row count
-      let estimatedRows: number | undefined;
-      try {
-        const [statRow] = await db`
+			// Get estimated row count
+			let estimatedRows: number | undefined;
+			try {
+				const [statRow] = await db`
           SELECT reltuples::bigint AS estimate
           FROM pg_class
           WHERE relname = ${tableName}
@@ -168,51 +174,53 @@ export async function scanSchema(databaseUrl: string): Promise<DatabaseSchema> {
               SELECT oid FROM pg_namespace WHERE nspname = ${schemaName}
             )
         `;
-        if (statRow) {
-          estimatedRows = Number((statRow as { estimate: string | number }).estimate);
-        }
-      } catch {
-        // ignore
-      }
+				if (statRow) {
+					estimatedRows = Number(
+						(statRow as { estimate: string | number }).estimate,
+					);
+				}
+			} catch {
+				// ignore
+			}
 
-      tables.push({
-        schema: schemaName,
-        name: tableName,
-        columns,
-        primaryKeys,
-        foreignKeys,
-        indexes,
-        estimatedRows,
-      });
-    }
+			tables.push({
+				schema: schemaName,
+				name: tableName,
+				columns,
+				primaryKeys,
+				foreignKeys,
+				indexes,
+				estimatedRows,
+			});
+		}
 
-    return {
-      scannedAt: new Date().toISOString(),
-      databaseName,
-      tableCount: tables.length,
-      tables,
-    };
-  } finally {
-    await db.end().catch(() => {});
-  }
+		return {
+			scannedAt: new Date().toISOString(),
+			databaseName,
+			tableCount: tables.length,
+			tables,
+		};
+	} finally {
+		await db.end().catch(() => {});
+	}
 }
 
 // ─── Persist / Load ────────────────────────────────────────────────────────────
 
 export function saveSchema(schema: DatabaseSchema): void {
-  ensureLocalDir();
-  writeFileSync(LOCAL_SCHEMA_PATH, JSON.stringify(schema, null, 2));
+	ensureLocalDir();
+	writeFileSync(LOCAL_SCHEMA_PATH, JSON.stringify(schema, null, 2));
 }
 
 export function loadSchema(): DatabaseSchema {
-  if (!existsSync(LOCAL_SCHEMA_PATH)) {
-    throw new Error(
-      'Schema not found. Run: qcp schema scan\n' +
-      'Make sure you are in the same directory where you ran qcp init.'
-    );
-  }
-  const raw = readFileSync(LOCAL_SCHEMA_PATH, 'utf-8');
-  return JSON.parse(raw) as DatabaseSchema;
+	if (!existsSync(LOCAL_SCHEMA_PATH)) {
+		throw new Error(
+			"Schema not found. Run: qcp schema scan\n" +
+				"Make sure you are in the same directory where you ran qcp init.",
+		);
+	}
+	const raw = readFileSync(LOCAL_SCHEMA_PATH, "utf-8");
+	return JSON.parse(raw) as DatabaseSchema;
 }
 
 // ─── Schema → LLM context ─────────────────────────────────────────────────────
@@ -221,43 +229,48 @@ export function loadSchema(): DatabaseSchema {
  * Convert schema to a compact text representation for LLM context.
  * Keeps only what the LLM needs; omits row data.
  */
-export function schemaToContext(schema: DatabaseSchema, maxTables = 60): string {
-  const tables = schema.tables.slice(0, maxTables);
-  const lines: string[] = [
-    `Database: ${schema.databaseName}`,
-    `Tables (${schema.tableCount}):`,
-    '',
-  ];
+export function schemaToContext(
+	schema: DatabaseSchema,
+	maxTables = 60,
+): string {
+	const tables = schema.tables.slice(0, maxTables);
+	const lines: string[] = [
+		`Database: ${schema.databaseName}`,
+		`Tables (${schema.tableCount}):`,
+		"",
+	];
 
-  for (const table of tables) {
-    const tableId = table.schema === 'public' ? table.name : `${table.schema}.${table.name}`;
-    lines.push(`TABLE ${tableId}`);
+	for (const table of tables) {
+		const tableId =
+			table.schema === "public" ? table.name : `${table.schema}.${table.name}`;
+		lines.push(`TABLE ${tableId}`);
 
-    for (const col of table.columns) {
-      const pk = col.isPrimaryKey ? ' [PK]' : '';
-      const nullable = col.nullable ? ' (nullable)' : '';
-      lines.push(`  ${col.name}: ${col.type}${pk}${nullable}`);
-    }
+		for (const col of table.columns) {
+			const pk = col.isPrimaryKey ? " [PK]" : "";
+			const nullable = col.nullable ? " (nullable)" : "";
+			lines.push(`  ${col.name}: ${col.type}${pk}${nullable}`);
+		}
 
-    if (table.foreignKeys.length > 0) {
-      for (const fk of table.foreignKeys) {
-        const ref = fk.referencedSchema === 'public'
-          ? fk.referencedTable
-          : `${fk.referencedSchema}.${fk.referencedTable}`;
-        lines.push(`  → ${fk.column} → ${ref}.${fk.referencedColumn}`);
-      }
-    }
+		if (table.foreignKeys.length > 0) {
+			for (const fk of table.foreignKeys) {
+				const ref =
+					fk.referencedSchema === "public"
+						? fk.referencedTable
+						: `${fk.referencedSchema}.${fk.referencedTable}`;
+				lines.push(`  → ${fk.column} → ${ref}.${fk.referencedColumn}`);
+			}
+		}
 
-    if (table.estimatedRows !== undefined && table.estimatedRows > 0) {
-      lines.push(`  (~${table.estimatedRows.toLocaleString()} rows)`);
-    }
+		if (table.estimatedRows !== undefined && table.estimatedRows > 0) {
+			lines.push(`  (~${table.estimatedRows.toLocaleString()} rows)`);
+		}
 
-    lines.push('');
-  }
+		lines.push("");
+	}
 
-  if (schema.tableCount > maxTables) {
-    lines.push(`... and ${schema.tableCount - maxTables} more tables`);
-  }
+	if (schema.tableCount > maxTables) {
+		lines.push(`... and ${schema.tableCount - maxTables} more tables`);
+	}
 
-  return lines.join('\n');
+	return lines.join("\n");
 }
