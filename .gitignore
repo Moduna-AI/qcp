@@ -1,0 +1,38 @@
+# Build output
+dist/
+
+# Dependencies
+node_modules/
+
+# qcp local files
+.qcp/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Support bundles
+qcp-support.zip
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Bun
+bun.lockb
+
+# TypeScript
+*.tsbuildinfo
+
+install.sh

@@ -1,0 +1,181 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Build binaries for all platforms ──────────────────────────────────────────
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - target: macos-arm64
+            runner: macos-latest
+            bun_target: ""
+          - target: macos-x64
+            runner: macos-13
+            bun_target: ""
+          - target: linux-x64
+            runner: ubuntu-latest
+            bun_target: "--target=bun-linux-x64"
+          - target: linux-arm64
+            runner: ubuntu-latest
+            bun_target: "--target=bun-linux-arm64"
+          - target: windows-x64
+            runner: ubuntu-latest
+            bun_target: "--target=bun-windows-x64"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run tests
+        run: bun test
+
+      - name: Build binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          OUTFILE="dist/qcp-${{ matrix.target }}"
+          if [ "${{ matrix.target }}" = "windows-x64" ]; then
+            OUTFILE="${OUTFILE}.exe"
+          fi
+          bun build ./src/cli/index.ts --compile ${{ matrix.bun_target }} --outfile="$OUTFILE"
+          if [ "${{ matrix.target }}" != "windows-x64" ]; then
+            chmod +x "$OUTFILE"
+          fi
+
+      - name: Smoke test (Unix)
+        if: matrix.target != 'windows-x64' && matrix.runner != 'ubuntu-latest'
+        run: dist/qcp-${{ matrix.target }} --version
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qcp-${{ matrix.target }}
+          path: dist/qcp-${{ matrix.target }}*
+
+  # ── Create GitHub Release ─────────────────────────────────────────────────────
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh dist/
+
+      - name: Compute SHA256 checksums
+        id: checksums
+        run: |
+          cd dist
+          sha256sum qcp-* > checksums.txt
+          cat checksums.txt
+
+          # Extract individual checksums for Homebrew formula
+          echo "sha256_macos_arm64=$(sha256sum qcp-macos-arm64 | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "sha256_macos_x64=$(sha256sum qcp-macos-x64 | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "sha256_linux_x64=$(sha256sum qcp-linux-x64 | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "sha256_linux_arm64=$(sha256sum qcp-linux-arm64 | awk '{print $1}')" >> $GITHUB_OUTPUT
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: qcp v${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
+          generate_release_notes: true
+          files: |
+            dist/qcp-macos-arm64
+            dist/qcp-macos-x64
+            dist/qcp-linux-x64
+            dist/qcp-linux-arm64
+            dist/qcp-windows-x64.exe
+            dist/checksums.txt
+
+      # ── Update Homebrew formula with new SHA256 ─────────────────────────────
+      - name: Update Homebrew formula
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SHA256_MACOS_ARM64: ${{ steps.checksums.outputs.sha256_macos_arm64 }}
+          SHA256_MACOS_X64: ${{ steps.checksums.outputs.sha256_macos_x64 }}
+          SHA256_LINUX_X64: ${{ steps.checksums.outputs.sha256_linux_x64 }}
+          SHA256_LINUX_ARM64: ${{ steps.checksums.outputs.sha256_linux_arm64 }}
+        run: |
+          # Update version and SHA256 in Formula/qcp.rb
+          sed -i "s/HOMEBREW_VERSION = \"[^\"]*\"/HOMEBREW_VERSION = \"${VERSION}\"/" Formula/qcp.rb
+          sed -i "s/PLACEHOLDER_SHA256_MACOS_ARM64/${SHA256_MACOS_ARM64}/" Formula/qcp.rb
+          sed -i "s/PLACEHOLDER_SHA256_MACOS_X64/${SHA256_MACOS_X64}/" Formula/qcp.rb
+          sed -i "s/PLACEHOLDER_SHA256_LINUX_X64/${SHA256_LINUX_X64}/" Formula/qcp.rb
+          sed -i "s/PLACEHOLDER_SHA256_LINUX_ARM64/${SHA256_LINUX_ARM64}/" Formula/qcp.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/qcp.rb
+          git diff --staged --quiet || git commit -m "chore: update Homebrew formula for v${VERSION} [skip ci]"
+          git push origin HEAD:main
+
+  # ── Publish to npm ────────────────────────────────────────────────────────────
+  npm-publish:
+    name: Publish to npm
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node.js (for npm publish)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build for Node.js distribution
+        run: |
+          mkdir -p dist
+          bun build ./src/cli/index.ts --target=node --outfile=dist/qcp.js
+          head -1 dist/qcp.js | grep -q '#!/usr/bin/env node' || \
+            (echo '#!/usr/bin/env node' | cat - dist/qcp.js > tmp && mv tmp dist/qcp.js)
+          chmod +x dist/qcp.js
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
