@@ -86,29 +86,35 @@ export async function executeQuery(
 	sql: string,
 	timeoutMs = 10_000,
 ): Promise<QueryResult> {
-	const db = postgres(databaseUrl, {
+	const cleanUrl = databaseUrl.split("?");
+
+	const db = postgres(cleanUrl[0], {
 		max: 1,
 		connect_timeout: 10,
-		connection: {
-			application_name: "qcp",
-			statement_timeout: timeoutMs,
-		},
+		ssl: cleanUrl[0].includes("prisma.io") ? "require" : undefined,
 	});
 
 	const start = Date.now();
 
 	try {
-		// Force read-only transaction
+		// 💡 FIX 1: Explicitly pass the query structure down using a direct array execution
+		// to stop postgres.js from parsing strings into prepared parameters ($1)
 		const rows = await db.begin("read only", async (tx) => {
+			// Force exact numerical interpolation for setting timeouts
+			await tx.unsafe(`SET LOCAL statement_timeout = ${Number(timeoutMs)}`);
+
+			// Pass the pure sql without letting the engine attempt interpolation hooks
 			return await tx.unsafe(sql);
 		});
 
 		const executionTimeMs = Date.now() - start;
-
 		const rowArray = Array.isArray(rows) ? rows : [];
-		const fields =
-			rowArray.length > 0 ? Object.keys(rowArray[0] as object) : [];
-
+		const fields = (rows as any).columns
+			? (rows as any).columns.map((c: any) => c.name)
+			: rowArray.length > 0
+				? Object.keys(rowArray as object)
+				: [];
+		console.log(rowArray);
 		return {
 			rows: rowArray as Record<string, unknown>[],
 			rowCount: rowArray.length,
@@ -116,7 +122,7 @@ export async function executeQuery(
 			executionTimeMs,
 		};
 	} finally {
-		await db.end().catch(() => {});
+		await db.end({ timeout: 2 }).catch(() => {});
 	}
 }
 
@@ -127,6 +133,7 @@ export async function explainQuery(
 	sql: string,
 ): Promise<{ plan: string; estimatedRows: number }> {
 	const db = postgres(databaseUrl, {
+		ssl: "require",
 		max: 1,
 		connect_timeout: 10,
 		connection: { application_name: "qcp-explain" },

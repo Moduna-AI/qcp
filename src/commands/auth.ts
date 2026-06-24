@@ -1,7 +1,12 @@
 import chalk from "chalk";
 import inquirer from "inquirer";
 import ora from "ora";
-import { DEFAULT_MODELS, loadConfig, saveConfig } from "../config/index.js";
+import {
+	AVAILABLE_MODELS,
+	DEFAULT_MODELS,
+	loadConfig,
+	saveConfig,
+} from "../config/index.js";
 import { createProvider } from "../llm/index.js";
 import {
 	printBanner,
@@ -52,7 +57,7 @@ export async function authCommand(): Promise<void> {
 	// ── Choose provider ───────────────────────────────────────────────────────────
 	const { provider } = await inquirer.prompt<{ provider: ProviderName }>([
 		{
-			type: "list",
+			type: "select",
 			name: "provider",
 			message: "Select a provider:",
 			default: config.provider,
@@ -154,7 +159,7 @@ export async function authCommand(): Promise<void> {
 	// ── Choose model ──────────────────────────────────────────────────────────────
 	const { model } = await inquirer.prompt<{ model: string }>([
 		{
-			type: "list",
+			type: "select",
 			name: "model",
 			message: "Select a model:",
 			default: DEFAULT_MODELS[provider],
@@ -225,10 +230,10 @@ export async function authSetKey(
 
 function _modelChoices(provider: ProviderName) {
 	const defaults: Record<ProviderName, string[]> = {
-		gemini: ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"],
-		openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
-		anthropic: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5"],
-		ollama: ["qwen3", "llama3", "mistral"],
+		gemini: AVAILABLE_MODELS.gemini,
+		openai: AVAILABLE_MODELS.openai,
+		anthropic: AVAILABLE_MODELS.anthropic,
+		ollama: AVAILABLE_MODELS.ollama,
 	};
 	return defaults[provider];
 }

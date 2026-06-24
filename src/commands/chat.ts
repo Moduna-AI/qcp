@@ -5,11 +5,11 @@
  * in plain English. Each answer builds on the schema context.
  */
 
+import { stdin as input, stdout as output } from "node:process";
+import * as readline from "node:readline/promises";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import ora from "ora";
-import { stdin as input, stdout as output } from "process";
-import * as readline from "readline/promises";
 import { getDatabaseUrl, loadConfig } from "../config/index.js";
 import { executeQuery } from "../db/index.js";
 import { createProvider } from "../llm/index.js";

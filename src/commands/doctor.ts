@@ -329,7 +329,7 @@ export async function doctorCommand(
 	}
 
 	// ── Human-readable output ─────────────────────────────────────────────────
-	console.log("\n" + chalk.bold.cyan("  qcp Doctor Report\n"));
+	console.log(`\n${chalk.bold.cyan("  qcp Doctor Report\n")}`);
 
 	printSection("Version");
 	for (const c of report.checks.installation) {

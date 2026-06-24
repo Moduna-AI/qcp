@@ -78,33 +78,43 @@ export class GeminiProvider implements LLMProvider {
 	): Promise<SummaryResult> {
 		const start = Date.now();
 		const prompt = buildSummaryPrompt(question, sql, results);
-
 		const genModel = this.client.getGenerativeModel({
 			model: this.modelName,
 		});
-
-		const streamResult = await genModel.generateContentStream(prompt);
-
 		let fullText = "";
 		let tokensIn = 0;
 		let tokensOut = 0;
-
-		for await (const chunk of streamResult.stream) {
-			const text = chunk.text();
-			if (text) {
+		try {
+			const streamResult = await genModel.generateContentStream(prompt);
+			for await (const chunk of streamResult.stream) {
+				const text = chunk.text();
+				if (!text) continue;
 				fullText += text;
 				onChunk?.(text);
 			}
+			try {
+				const response = await streamResult.response;
+				tokensIn = response.usageMetadata?.promptTokenCount ?? 0;
+				tokensOut = response.usageMetadata?.candidatesTokenCount ?? 0;
+			} catch {
+				// ignore usage metadata errors
+			}
+		} catch (streamError) {
+			// Fallback to non-streaming
+			const result = await genModel.generateContent(prompt);
+			const response = result.response;
+			fullText = response.text();
+			onChunk?.(fullText);
+			tokensIn = response.usageMetadata?.promptTokenCount ?? 0;
+			tokensOut = response.usageMetadata?.candidatesTokenCount ?? 0;
+			console.warn(
+				`Streaming failed, fell back to standard generation: ${
+					streamError instanceof Error
+						? streamError.message
+						: String(streamError)
+				}`,
+			);
 		}
-
-		try {
-			const finalResponse = await streamResult.response;
-			tokensIn = finalResponse.usageMetadata?.promptTokenCount ?? 0;
-			tokensOut = finalResponse.usageMetadata?.candidatesTokenCount ?? 0;
-		} catch {
-			// ignore
-		}
-
 		return {
 			summary: fullText.trim(),
 			tokensIn,

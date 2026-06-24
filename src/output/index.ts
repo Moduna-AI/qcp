@@ -17,26 +17,26 @@ export function printBanner(): void {
 
 export function printQuestion(question: string): void {
 	console.log(chalk.bold("\nQuestion:"));
-	console.log(chalk.white("  " + question));
+	console.log(chalk.white(`  ${question}`));
 }
 
 export function printSql(sql: string): void {
 	console.log(chalk.bold("\nGenerated SQL:"));
 	const lines = sql.split("\n");
 	for (const line of lines) {
-		console.log(chalk.cyan("  " + line));
+		console.log(chalk.cyan(`  ${line}`));
 	}
 }
 
 export function printExplanation(explanation: string): void {
 	if (!explanation.trim()) return;
 	console.log(chalk.bold("\nExplanation:"));
-	console.log(chalk.white("  " + explanation.replace(/\n/g, "\n  ")));
+	console.log(chalk.white(`  ${explanation.replace(/\n/g, "\n  ")}`));
 }
 
 export function printSummary(summary: string): void {
 	console.log(chalk.bold("\nInsight:"));
-	console.log(chalk.white("  " + summary.replace(/\n/g, "\n  ")));
+	console.log(chalk.white(`  ${summary.replace(/\n/g, "\n  ")}`));
 }
 
 // ─── Safety report ────────────────────────────────────────────────────────────
@@ -114,7 +114,7 @@ export function printResults(result: QueryResult): void {
 					return val.toISOString().replace("T", " ").slice(0, 19);
 				const str = String(val);
 				// Truncate very long strings
-				return str.length > 80 ? str.slice(0, 77) + "…" : str;
+				return str.length > 80 ? `${str.slice(0, 77)}…` : str;
 			}),
 		);
 	}
