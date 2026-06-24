@@ -56,20 +56,29 @@ const QcpConfigSchema = z.object({
 
 export const DEFAULT_MODELS: Record<ProviderName, string> = {
 	gemini: "gemini-2.5-flash",
-	openai: "gpt-4o",
-	anthropic: "claude-opus-4-5",
+	openai: "gpt-5.5",
+	anthropic: "claude-opus-4-8",
 	ollama: "qwen3",
 };
 
 export const AVAILABLE_MODELS: Record<ProviderName, string[]> = {
 	gemini: [
+		"gemini-3.5-flash",
+		"gemini-3.1-flash-lite",
 		"gemini-2.5-flash",
 		"gemini-2.5-pro",
-		"gemini-1.5-pro",
-		"gemini-1.5-flash",
 	],
-	openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o1-mini"],
-	anthropic: ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5"],
+	openai: [
+		"gpt-5.5-pro",
+		"gpt-5.5",
+		"gpt-5.4-pro",
+		"gpt-5.4",
+		"gpt-5.4-mini",
+		"gpt-5.4-nano",
+		"gpt-4.1",
+		"gpt-4.1-mini",
+	],
+	anthropic: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
 	ollama: ["qwen3", "llama3", "mistral", "codellama", "phi3"],
 };
 
