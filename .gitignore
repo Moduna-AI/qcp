@@ -34,5 +34,3 @@ bun.lockb
 
 # TypeScript
 *.tsbuildinfo
-
-install.sh
