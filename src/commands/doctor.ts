@@ -1,15 +1,15 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { arch, version as nodeVersion, platform, release } from "node:os";
+import { join } from "node:path";
+import { ZipArchive } from "archiver";
 import chalk from "chalk";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import ora from "ora";
-import { arch, version as nodeVersion, platform, release } from "os";
-import { join } from "path";
 import {
 	getDatabaseUrl,
 	LOCAL_SCHEMA_PATH,
 	LOCAL_SUPPORT_DIR,
 	LOGS_DIR,
 	loadConfig,
-	QCP_HOME,
 	redactConfig,
 } from "../config/index.js";
 import { testConnection } from "../db/index.js";
@@ -19,7 +19,6 @@ import {
 	printError,
 	printInfo,
 	printSection,
-	printSuccess,
 } from "../output/index.js";
 import { loadSchema } from "../schema/index.js";
 import {
@@ -415,11 +414,12 @@ async function generateSupportBundle(
 		writeFileSync(join(LOCAL_SUPPORT_DIR, "logs.txt"), logContent);
 
 		// 4. Create zip
-		const archiver = (await import("archiver")).default;
-		const { createWriteStream } = await import("fs");
+		const { createWriteStream } = await import("node:fs");
 		const zipPath = "qcp-support.zip";
 		const output = createWriteStream(zipPath);
-		const archive = archiver("zip", { zlib: { level: 9 } });
+		const archive = new ZipArchive({
+			zlib: { level: 9 }, // Sets the compression level.
+		});
 
 		await new Promise<void>((resolve, reject) => {
 			output.on("close", resolve);

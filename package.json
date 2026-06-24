@@ -1,6 +1,6 @@
 {
 	"name": "qcp",
-	"version": "0.1.1-alpha.6",
+	"version": "0.1.1-alpha.7",
 	"description": "AI-powered CLI for querying PostgreSQL in natural language",
 	"type": "module",
 	"bin": {
