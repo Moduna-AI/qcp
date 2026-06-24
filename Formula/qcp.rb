@@ -25,10 +25,6 @@ class Qcp < Formula
       sha256 "PLACEHOLDER_SHA256_MACOS_ARM64"
     end
 
-    on_intel do
-      url "https://github.com/Moduna-AI/qcp/releases/download/v#{version}/qcp-macos-x64"
-      sha256 "PLACEHOLDER_SHA256_MACOS_X64"
-    end
   end
 
   on_linux do

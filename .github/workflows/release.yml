@@ -19,9 +19,6 @@ jobs:
           - target: macos-arm64
             runner: macos-latest
             bun_target: ""
-          - target: macos-x64
-            runner: macos-13
-            bun_target: ""
           - target: linux-x64
             runner: ubuntu-latest
             bun_target: "--target=bun-linux-x64"
@@ -101,7 +98,6 @@ jobs:
           cat checksums.txt
 
           echo "sha256_macos_arm64=$(sha256sum qcp-macos-arm64 | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-          echo "sha256_macos_x64=$(sha256sum qcp-macos-x64 | awk '{print $1}')" >> "$GITHUB_OUTPUT"
           echo "sha256_linux_x64=$(sha256sum qcp-linux-x64 | awk '{print $1}')" >> "$GITHUB_OUTPUT"
           echo "sha256_linux_arm64=$(sha256sum qcp-linux-arm64 | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
@@ -118,7 +114,6 @@ jobs:
           generate_release_notes: true
           files: |
             dist/qcp-macos-arm64
-            dist/qcp-macos-x64
             dist/qcp-linux-x64
             dist/qcp-linux-arm64
             dist/qcp-windows-x64.exe
