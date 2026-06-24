@@ -1,6 +1,6 @@
 {
-	"name": "qcp",
-	"version": "0.1.1-alpha.10",
+	"name": "@moduna/qcp",
+	"version": "0.1.1-alpha.11",
 	"description": "AI-powered CLI for querying PostgreSQL in natural language",
 	"type": "module",
 	"bin": {
@@ -11,6 +11,9 @@
 		"README.md",
 		"LICENSE"
 	],
+	"publishConfig": {
+		"access": "public"
+	},
 	"scripts": {
 		"dev": "bun run src/cli/index.ts",
 		"build": "bun build ./src/cli/index.ts --target=node --outdir=dist --outfile=qcp.js",
@@ -45,7 +48,7 @@
 	"homepage": "https://github.com/Moduna-AI/qcp",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/Moduna-AI/qcp.git"
+		"url": "git+https://github.com/Moduna-AI/qcp.git"
 	},
 	"bugs": {
 		"url": "https://github.com/Moduna-AI/qcp/issues"

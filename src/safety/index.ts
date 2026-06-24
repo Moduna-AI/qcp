@@ -76,6 +76,33 @@ export function validateSql(sql: string): SafetyReport {
 		report.errors.push("Empty SQL query.");
 		return report;
 	}
+	const firstKeyword = trimmedSql.match(/^\s*([a-zA-Z]+)/)?.[1]?.toUpperCase();
+
+	const blockedKeywords = new Set([
+		"INSERT",
+		"UPDATE",
+		"DELETE",
+		"DROP",
+		"ALTER",
+		"CREATE",
+		"TRUNCATE",
+		"REPLACE",
+		"MERGE",
+		"CALL",
+		"EXEC",
+		"EXECUTE",
+		"GRANT",
+		"REVOKE",
+	]);
+
+	if (firstKeyword && blockedKeywords.has(firstKeyword)) {
+		report.statementType = firstKeyword.toLowerCase();
+		report.errors.push(
+			`Dangerous operation rejected: ${firstKeyword} is not permitted. ` +
+				`qcp is read-only — only SELECT, WITH, and EXPLAIN are allowed.`,
+		);
+		return report;
+	}
 
 	// ── Handle EXPLAIN ─────────────────────────────────────────────────────────
 	if (isExplainStatement(trimmedSql)) {

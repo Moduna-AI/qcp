@@ -109,12 +109,9 @@ export async function executeQuery(
 
 		const executionTimeMs = Date.now() - start;
 		const rowArray = Array.isArray(rows) ? rows : [];
-		const fields = (rows as any).columns
-			? (rows as any).columns.map((c: any) => c.name)
-			: rowArray.length > 0
-				? Object.keys(rowArray as object)
-				: [];
-		console.log(rowArray);
+		type Row = Record<string, unknown>;
+
+		const fields = rowArray.length > 0 ? Object.keys(rowArray[0] as Row) : [];
 		return {
 			rows: rowArray as Record<string, unknown>[],
 			rowCount: rowArray.length,

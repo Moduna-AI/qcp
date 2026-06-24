@@ -32,7 +32,7 @@ jobs:
         run: bun run lint
 
       - name: Run tests
-        run: bun test --reporter=verbose
+        run: bun test
 
   build:
     name: Build binary (${{ matrix.target }})
@@ -40,16 +40,21 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/main'
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: macos-arm64
             runner: macos-latest
+            bun_target: ""
           - target: macos-x64
             runner: macos-13
+            bun_target: ""
           - target: linux-x64
             runner: ubuntu-latest
+            bun_target: bun-linux-x64
           - target: linux-arm64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04-arm
+            bun_target: bun-linux-arm64
 
     steps:
       - name: Checkout
@@ -66,18 +71,16 @@ jobs:
       - name: Build binary (${{ matrix.target }})
         run: |
           mkdir -p dist
-          if [ "${{ matrix.target }}" = "linux-arm64" ]; then
+
+          if [ -n "${{ matrix.bun_target }}" ]; then
             bun build ./src/cli/index.ts --compile \
-              --target=bun-linux-arm64 \
-              --outfile=dist/qcp-${{ matrix.target }}
-          elif [ "${{ matrix.target }}" = "linux-x64" ]; then
-            bun build ./src/cli/index.ts --compile \
-              --target=bun-linux-x64 \
+              --target=${{ matrix.bun_target }} \
               --outfile=dist/qcp-${{ matrix.target }}
           else
             bun build ./src/cli/index.ts --compile \
               --outfile=dist/qcp-${{ matrix.target }}
           fi
+
           chmod +x dist/qcp-${{ matrix.target }}
 
       - name: Smoke test binary
