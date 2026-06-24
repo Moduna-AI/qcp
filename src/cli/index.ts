@@ -49,7 +49,7 @@ ${chalk.bold('Example:')}
   });
 
 program
-  .command('auth set <provider> <api-key>', { hidden: true })
+  .command('set <provider> <api-key>', { hidden: true })
   .description('Set an API key for a provider directly')
   .action(async (provider: string, apiKey: string) => {
     const { authSetKey } = await import('../commands/auth.js');
