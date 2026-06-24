@@ -1,6 +1,6 @@
 {
 	"name": "qcp",
-	"version": "0.1.1-alpha.3",
+	"version": "0.1.1-alpha.4",
 	"description": "AI-powered CLI for querying PostgreSQL in natural language",
 	"type": "module",
 	"bin": {
@@ -75,6 +75,6 @@
 		"@biomejs/biome": "^2.5.1",
 		"@types/archiver": "^6.0.3",
 		"@types/bun": "latest",
-		"typescript": "^5.7.2"
+		"typescript": "^6.0.3"
 	}
 }
