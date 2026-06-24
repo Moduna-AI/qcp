@@ -3,7 +3,7 @@
 
 # ─── Variables ─────────────────────────────────────────────────────────────────
 
-VERSION  := $(shell node -e "console.log(require('./package.json').version)" 2>/dev/null || echo "0.1.0")
+VERSION := $(shell node -p "require('./package.json').version")
 BINARY   := dist/qcp
 NODE_BIN := dist/qcp.js
 SRC      := src/cli/index.ts

@@ -8,7 +8,7 @@
 # For HEAD builds (local development / pre-release):
 #   brew install --HEAD Moduna-AI/qcp/qcp
 
-HOMEBREW_VERSION = "0.1.0"
+HOMEBREW_VERSION = $(jq -r '.version' package.json)
 
 class Qcp < Formula
   desc "AI-powered CLI for querying PostgreSQL in natural language"
