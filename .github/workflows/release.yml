@@ -92,10 +92,10 @@ jobs:
           merge-multiple: true
 
       - name: Checkout Homebrew Tap Repo
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7 # Note: Use v4 as v7 does not exist yet
         with:
-          repository: 'Moduna-AI/homebrew-qcp'
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }} # External PAT with write access to the tap repo
+          repository: ${{ github.repository }}
+          token: ${{ secrets.GITHUB_TOKEN }} 
           path: 'tap-repo'
 
       - name: Compute Checksums and Update Remote Tap Formula
@@ -111,20 +111,27 @@ jobs:
           SHA_LINUX_ARM64=$(sha256sum qcp-linux-arm64 | awk '{print $1}')
           cd .. # Move back to workspace root
 
-          # 2. Define path to the checked-out tap formula
+          # 2. Prepare the tap-repo directory and resolve detached HEAD
+          cd tap-repo
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Fix the detached HEAD by tracking the remote main branch
+          git fetch origin main
+          git checkout main
+          cd .. # Back to root to run sed safely
+
+          # 3. Define path to the checked-out tap formula
           FORMULA_PATH="tap-repo/Formula/qcp.rb"
           
           if [ -f "$FORMULA_PATH" ]; then
-            # 3. Smart Regex Replacement: Find the line with the binary name, 
-            # go to the next line (n), and swap out whatever sha256 is currently there.
+            # 4. Smart Regex Replacement (Note: Mac runners might need sed -i '', but assuming Linux runner)
             sed -i "/qcp-macos-arm64/{n;s/sha256 \".*\"/sha256 \"${SHA_MAC_ARM64}\"/}" $FORMULA_PATH
             sed -i "/qcp-linux-x64/{n;s/sha256 \".*\"/sha256 \"${SHA_LINUX_X64}\"/}" $FORMULA_PATH
             sed -i "/qcp-linux-arm64/{n;s/sha256 \".*\"/sha256 \"${SHA_LINUX_ARM64}\"/}" $FORMULA_PATH
             
-            # 4. Commit and push modifications safely
+            # 5. Commit and push modifications safely
             cd tap-repo
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "github-actions[bot]@users.noreply.github.com"
             git add Formula/qcp.rb
             
             if ! git diff --cached --quiet; then
@@ -191,6 +198,21 @@ jobs:
           chmod +x dist/qcp.js
 
       - name: Publish to npm
-        run: npm publish --access public --tag next
+        run: |
+          # 1. Get the tag name from GITHUB_REF (e.g., v0.1.2-alpha.0 or v0.1.2)
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          echo "Processing tag: $TAG_NAME"
+
+          # 2. Check if the tag contains 'alpha', 'beta', or 'rc'
+          if [[ "$TAG_NAME" =~ alpha || "$TAG_NAME" =~ beta || "$TAG_NAME" =~ rc ]]; then
+            echo "Pre-release detected. Setting npm tag to 'next'."
+            NPM_TAG="next"
+          else
+            echo "Stable release detected. Setting npm tag to 'latest'."
+            NPM_TAG="latest"
+          fi
+
+          # 3. Publish using the dynamic tag
+          npm publish --access public --tag $NPM_TAG
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
