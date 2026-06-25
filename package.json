@@ -1,10 +1,10 @@
 {
 	"name": "@moduna/qcp",
-	"version": "0.1.1-beta.2",
+	"version": "0.1.1-beta.3",
 	"description": "AI-powered CLI for querying PostgreSQL in natural language",
 	"type": "module",
 	"bin": {
-		"qcp": "./dist/qcp.js"
+		"qcp": "dist/qcp.js"
 	},
 	"files": [
 		"dist/",
