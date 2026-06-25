@@ -4,7 +4,8 @@
 
 **AI-powered natural language interface for PostgreSQL**
 
-[![npm version](https://img.shields.io/npm/v/qcp?color=blue&label=npm)](https://www.npmjs.com/package/qcp)
+[![npm stable version](https://img.shields.io/npm/v/%40moduna/qcp?color=blue&label=npm%20stable)](https://www.npmjs.com/package/@moduna/qcp)
+[![npm beta version](https://img.shields.io/npm/v/%40moduna/qcp/next?color=orange&label=npm%20beta)](https://www.npmjs.com/package/@moduna/qcp/v/next)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![CI](https://github.com/Moduna-AI/qcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Moduna-AI/qcp/actions)
 
