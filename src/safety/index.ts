@@ -8,7 +8,7 @@
 
 import type { Statement } from "pgsql-ast-parser";
 import { parse } from "pgsql-ast-parser";
-import type { ApprovalReason, SafetyReport } from "../types/index.js";
+import type { ApprovalReason, SafetyReport } from "@/types/index.js";
 
 // ─── Statement allowlist ──────────────────────────────────────────────────────
 

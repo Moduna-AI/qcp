@@ -5,7 +5,7 @@ import type {
 	QueryMetrics,
 	QueryResult,
 	SafetyReport,
-} from "../types/index.js";
+} from "@/types/index.js";
 
 // ─── Branding ─────────────────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
-import { schemaToContext } from "../schema/index.js";
-import type { DatabaseSchema, QueryResult } from "../types/index.js";
+import { schemaToContext } from "@/schema/index.js";
+import type { DatabaseSchema, QueryResult } from "@/types/index.js";
 
 // ─── System prompts ───────────────────────────────────────────────────────────
 
