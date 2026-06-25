@@ -1,9 +1,9 @@
 import chalk from "chalk";
 import ora from "ora";
-import { getDatabaseUrl, loadConfig } from "../config/index.js";
-import { explainQuery } from "../db/index.js";
-import { createProvider } from "../llm/index.js";
-import { log } from "../logger/index.js";
+import { getDatabaseUrl, loadConfig } from "@/config/index.js";
+import { explainQuery } from "@/db/index.js";
+import { createProvider } from "@/llm/index.js";
+import { log } from "@/logger/index.js";
 import {
 	printError,
 	printExplanation,
@@ -12,14 +12,15 @@ import {
 	printSafetyReport,
 	printSection,
 	printSql,
-} from "../output/index.js";
-import { validateSql } from "../safety/index.js";
-import { loadSchema } from "../schema/index.js";
+} from "@/output/index.js";
+import { validateSql } from "@/safety/index.js";
+import { loadSchema } from "@/schema/index.js";
 import {
 	initTelemetry,
 	shutdownTelemetry,
 	trackActive,
-} from "../telemetry/index.js";
+} from "@/telemetry/index.js";
+import type { DatabaseSchema, LLMProvider, SqlGenerationResult } from "@/types";
 
 export interface ExplainOptions {
 	showPlan?: boolean;
@@ -43,7 +44,7 @@ export async function explainCommand(
 	// ── Load schema ─────────────────────────────────────────────────────────────
 	const schemaSpinner = ora("Loading schema...").start();
 
-	let schema;
+	let schema: DatabaseSchema;
 	try {
 		schema = loadSchema();
 		schemaSpinner.succeed(`Schema loaded (${schema.tableCount} tables)`);
@@ -56,7 +57,7 @@ export async function explainCommand(
 	}
 
 	// ── Create provider ─────────────────────────────────────────────────────────
-	let provider;
+	let provider: LLMProvider;
 	try {
 		provider = createProvider(config);
 	} catch (err: unknown) {
@@ -71,7 +72,7 @@ export async function explainCommand(
 	// ── Generate SQL ─────────────────────────────────────────────────────────────
 	const sqlSpinner = ora("Generating SQL...").start();
 
-	let sqlResult;
+	let sqlResult: SqlGenerationResult;
 	try {
 		sqlResult = await provider.generateSql(question, schema);
 		sqlSpinner.succeed("SQL generated");

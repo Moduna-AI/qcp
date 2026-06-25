@@ -8,10 +8,10 @@
  * - Only active when user has opted in (default: true on first run)
  */
 
-import { arch, platform } from "os";
+import { arch, platform } from "node:os";
 import { PostHog } from "posthog-node";
-import type { ProviderName, QcpConfig } from "../types/index.js";
-import { QCP_VERSION } from "../version.js";
+import type { ProviderName, QcpConfig } from "@/types/index.js";
+import { QCP_VERSION } from "@/version.js";
 
 const POSTHOG_KEY = "phc_pLMwKnLTd5oyY6aKwWRjnKwPz2vfXnZuSKnaxyGCbHKk";
 const POSTHOG_HOST = "https://us.i.posthog.com";

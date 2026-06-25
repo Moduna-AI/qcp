@@ -11,27 +11,23 @@ import {
 	LOGS_DIR,
 	loadConfig,
 	redactConfig,
-} from "../config/index.js";
-import { testConnection } from "../db/index.js";
-import { createProvider } from "../llm/index.js";
+} from "@/config/index.js";
+import { testConnection } from "@/db/index.js";
+import { createProvider } from "@/llm/index.js";
 import {
 	printDoctorCheck,
 	printError,
 	printInfo,
 	printSection,
-} from "../output/index.js";
-import { loadSchema } from "../schema/index.js";
+} from "@/output/index.js";
+import { loadSchema } from "@/schema/index.js";
 import {
 	initTelemetry,
 	shutdownTelemetry,
 	trackDoctor,
-} from "../telemetry/index.js";
-import type {
-	DoctorCheck,
-	DoctorReport,
-	HealthStatus,
-} from "../types/index.js";
-import { QCP_VERSION } from "../version.js";
+} from "@/telemetry/index.js";
+import type { DoctorCheck, DoctorReport, HealthStatus } from "@/types/index.js";
+import { QCP_VERSION } from "@/version.js";
 
 export interface DoctorOptions {
 	json?: boolean;

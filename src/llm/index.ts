@@ -1,5 +1,5 @@
-import { getApiKey } from "../config/index.js";
-import type { LLMProvider, ProviderName, QcpConfig } from "../types/index.js";
+import { getApiKey } from "@/config/index.js";
+import type { LLMProvider, ProviderName, QcpConfig } from "@/types/index.js";
 import { AnthropicProvider } from "./providers/anthropic.js";
 import { GeminiProvider } from "./providers/gemini.js";
 import { OllamaProvider } from "./providers/ollama.js";

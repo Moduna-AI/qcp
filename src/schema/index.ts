@@ -1,13 +1,13 @@
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import postgres from "postgres";
-import { ensureLocalDir, LOCAL_SCHEMA_PATH } from "../config/index.js";
+import { ensureLocalDir, LOCAL_SCHEMA_PATH } from "@/config/index.js";
 import type {
 	DatabaseSchema,
 	SchemaColumn,
 	SchemaForeignKey,
 	SchemaIndex,
 	SchemaTable,
-} from "../types/index.js";
+} from "@/types/index.js";
 
 // ─── Schema scanning ──────────────────────────────────────────────────────────
 

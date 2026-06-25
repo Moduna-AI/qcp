@@ -86,13 +86,13 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: dist/
           merge-multiple: true
 
       - name: Checkout Homebrew Tap Repo
-        uses: actions/checkout@v7 # Note: Use v4 as v7 does not exist yet
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.repository }}
           token: ${{ secrets.GITHUB_TOKEN }} 

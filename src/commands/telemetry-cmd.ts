@@ -1,6 +1,6 @@
 import chalk from "chalk";
-import { loadConfig, saveConfig } from "../config/index.js";
-import { printSection, printSuccess } from "../output/index.js";
+import { loadConfig, saveConfig } from "@/config/index.js";
+import { printSection, printSuccess } from "@/output/index.js";
 
 export function telemetryOnCommand(): void {
 	const config = loadConfig();

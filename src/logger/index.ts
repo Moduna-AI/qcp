@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import winston from "winston";
-import { LOGS_DIR, QCP_HOME } from "../config/index.js";
+import { LOGS_DIR, QCP_HOME } from "@/config/index.js";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_FILES = 5;
