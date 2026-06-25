@@ -174,9 +174,9 @@ qcp ask "question" --yes        # Skip approval prompts
 
 | Provider | Default Model | API Key |
 |---|---|---|
-| **Gemini** (default) | `gemini-2.5-flash` | [Google AI Studio](https://aistudio.google.com/app/apikey) |
-| **OpenAI** | `gpt-4o` | [OpenAI Platform](https://platform.openai.com/api-keys) |
-| **Anthropic** | `claude-opus-4-5` | [Anthropic Console](https://console.anthropic.com) |
+| **Gemini** (default) | `gemini-3.5-flash` | [Google AI Studio](https://aistudio.google.com/app/apikey) |
+| **OpenAI** | `gpt-5.5` | [OpenAI Platform](https://platform.openai.com/api-keys) |
+| **Anthropic** | `claude-opus-4-8` | [Anthropic Console](https://console.anthropic.com) |
 | **Ollama** | `qwen3` | No key needed (local) |
 
 ---
