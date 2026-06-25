@@ -1,7 +1,7 @@
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { isatty } from "node:tty";
 import chalk from "chalk";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
 import inquirer from "inquirer";
-import { isatty } from "tty";
 import {
 	configExists,
 	createDefaultConfig,
@@ -9,19 +9,19 @@ import {
 	LOCAL_QCP_DIR,
 	LOCAL_SCHEMA_PATH,
 	saveConfig,
-} from "../config/index.js";
+} from "@/config/index.js";
 import {
 	printBanner,
 	printInfo,
 	printSuccess,
 	printWarning,
-} from "../output/index.js";
+} from "@/output/index.js";
 import {
 	initTelemetry,
 	shutdownTelemetry,
 	trackInstall,
-} from "../telemetry/index.js";
-import { QCP_VERSION } from "../version.js";
+} from "@/telemetry/index.js";
+import { QCP_VERSION } from "@/version.js";
 
 export async function initCommand(): Promise<void> {
 	printBanner();
@@ -108,7 +108,7 @@ export async function initCommand(): Promise<void> {
 	// ── .gitignore advice ─────────────────────────────────────────────────────
 	const gitignorePath = ".gitignore";
 	if (existsSync(gitignorePath)) {
-		const { default: fs } = await import("fs");
+		const { default: fs } = await import("node:fs");
 		const existing = fs.readFileSync(gitignorePath, "utf-8");
 		if (!existing.includes(".qcp/")) {
 			printWarning(

@@ -10,10 +10,10 @@ import * as readline from "node:readline/promises";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import ora from "ora";
-import { getDatabaseUrl, loadConfig } from "../config/index.js";
-import { executeQuery } from "../db/index.js";
-import { createProvider } from "../llm/index.js";
-import { log } from "../logger/index.js";
+import { getDatabaseUrl, loadConfig } from "@/config/index.js";
+import { executeQuery } from "@/db/index.js";
+import { createProvider } from "@/llm/index.js";
+import { log } from "@/logger/index.js";
 import {
 	printApprovalWarning,
 	printBanner,
@@ -25,9 +25,9 @@ import {
 	printSection,
 	printSql,
 	printSummary,
-} from "../output/index.js";
-import { getApprovalReasons, validateSql } from "../safety/index.js";
-import { loadSchema } from "../schema/index.js";
+} from "@/output/index.js";
+import { getApprovalReasons, validateSql } from "@/safety/index.js";
+import { loadSchema } from "@/schema/index.js";
 import {
 	initTelemetry,
 	shutdownTelemetry,
@@ -36,8 +36,13 @@ import {
 	trackHumanApproval,
 	trackQuery,
 	trackQueryRejected,
-} from "../telemetry/index.js";
-import type { DatabaseSchema, LLMProvider } from "../types/index.js";
+} from "@/telemetry/index.js";
+import type {
+	DatabaseSchema,
+	LLMProvider,
+	QueryResult,
+	SqlGenerationResult,
+} from "@/types/index.js";
 
 const HELP_COMMANDS = new Set(["/help", "?", "help"]);
 const EXIT_COMMANDS = new Set([
@@ -87,7 +92,7 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 		schemaSpinner.succeed(
 			`Schema loaded · ${schema.databaseName} · ${schema.tableCount} tables`,
 		);
-	} catch (err: unknown) {
+	} catch (_: unknown) {
 		schemaSpinner.fail("Schema not found. Run: qcp schema scan");
 		await shutdownTelemetry();
 		process.exit(1);
@@ -207,7 +212,7 @@ async function _handleQuestion(
 ): Promise<void> {
 	// Generate SQL
 	const sqlSpinner = ora("Generating SQL...").start();
-	let sqlResult;
+	let sqlResult: SqlGenerationResult;
 
 	try {
 		sqlResult = await session.provider.generateSql(question, session.schema);
@@ -261,7 +266,7 @@ async function _handleQuestion(
 
 	// Execute
 	const execSpinner = ora("Executing...").start();
-	let queryResult;
+	let queryResult: QueryResult;
 
 	try {
 		queryResult = await executeQuery(databaseUrl, safetyReport.processedSql);

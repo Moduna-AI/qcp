@@ -5,15 +5,15 @@ import {
 	DEFAULT_MODELS,
 	loadConfig,
 	saveConfig,
-} from "../config/index.js";
+} from "@/config/index.js";
 import {
 	printError,
 	printInfo,
 	printSection,
 	printSuccess,
-} from "../output/index.js";
-import { trackProviderSelected } from "../telemetry/index.js";
-import type { ProviderName } from "../types/index.js";
+} from "@/output/index.js";
+import { trackProviderSelected } from "@/telemetry/index.js";
+import type { ProviderName } from "@/types/index.js";
 
 const PROVIDERS: ProviderName[] = ["gemini", "openai", "anthropic", "ollama"];
 

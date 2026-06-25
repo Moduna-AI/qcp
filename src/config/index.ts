@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { v7 as uuidv7 } from "uuid";
 import { z } from "zod";
-import type { ProviderName, QcpConfig } from "../types/index.js";
+import type { ProviderName, QcpConfig } from "@/types/index.js";
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
 

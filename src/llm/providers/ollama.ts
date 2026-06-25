@@ -1,16 +1,16 @@
+import {
+	buildSqlPrompt,
+	buildSummaryPrompt,
+	extractSqlAndExplanation,
+	SQL_SYSTEM_PROMPT,
+} from "@/llm/prompts.js";
 import type {
 	DatabaseSchema,
 	LLMProvider,
 	QueryResult,
 	SqlGenerationResult,
 	SummaryResult,
-} from "../../types/index.js";
-import {
-	buildSqlPrompt,
-	buildSummaryPrompt,
-	extractSqlAndExplanation,
-	SQL_SYSTEM_PROMPT,
-} from "../prompts.js";
+} from "@/types/index.js";
 
 export class OllamaProvider implements LLMProvider {
 	readonly providerName = "ollama" as const;

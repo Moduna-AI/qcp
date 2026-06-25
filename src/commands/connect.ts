@@ -1,14 +1,14 @@
 import chalk from "chalk";
 import ora from "ora";
-import { getDatabaseUrl, loadConfig, saveConfig } from "../config/index.js";
-import { checkReadOnlyUser, testConnection } from "../db/index.js";
-import { log } from "../logger/index.js";
+import { getDatabaseUrl, loadConfig, saveConfig } from "@/config/index.js";
+import { checkReadOnlyUser, testConnection } from "@/db/index.js";
+import { log } from "@/logger/index.js";
 import {
 	printError,
 	printInfo,
 	printSuccess,
 	printWarning,
-} from "../output/index.js";
+} from "@/output/index.js";
 
 export async function connectCommand(databaseUrl?: string): Promise<void> {
 	const config = loadConfig();

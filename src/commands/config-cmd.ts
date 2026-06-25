@@ -1,7 +1,7 @@
 import chalk from "chalk";
-import { CONFIG_PATH, loadConfig, saveConfig } from "../config/index.js";
-import { printError, printSection, printSuccess } from "../output/index.js";
-import type { ProviderName } from "../types/index.js";
+import { CONFIG_PATH, loadConfig, saveConfig } from "@/config/index.js";
+import { printError, printSection, printSuccess } from "@/output/index.js";
+import type { ProviderName } from "@/types/index.js";
 
 const SETTABLE_BOOLEANS = ["safeMode", "showSql", "showMetrics", "telemetry"];
 const SETTABLE_STRINGS = ["ollamaHost"];

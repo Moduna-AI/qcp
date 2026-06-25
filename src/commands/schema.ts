@@ -4,16 +4,16 @@ import {
 	getDatabaseUrl,
 	LOCAL_SCHEMA_PATH,
 	loadConfig,
-} from "../config/index.js";
-import { log } from "../logger/index.js";
+} from "@/config/index.js";
+import { log } from "@/logger/index.js";
 import {
 	printError,
 	printInfo,
 	printSection,
 	printSuccess,
-} from "../output/index.js";
-import { loadSchema, saveSchema, scanSchema } from "../schema/index.js";
-import { trackSchemaScan } from "../telemetry/index.js";
+} from "@/output/index.js";
+import { loadSchema, saveSchema, scanSchema } from "@/schema/index.js";
+import { trackSchemaScan } from "@/telemetry/index.js";
 
 export async function schemaScanCommand(): Promise<void> {
 	const config = loadConfig();

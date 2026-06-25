@@ -1,14 +1,10 @@
 import chalk from "chalk";
 import inquirer from "inquirer";
 import ora from "ora";
-import {
-	ensureConfigDir,
-	getDatabaseUrl,
-	loadConfig,
-} from "../config/index.js";
-import { executeQuery, explainQuery } from "../db/index.js";
-import { createProvider } from "../llm/index.js";
-import { log } from "../logger/index.js";
+import { ensureConfigDir, getDatabaseUrl, loadConfig } from "@/config/index.js";
+import { executeQuery, explainQuery } from "@/db/index.js";
+import { createProvider } from "@/llm/index.js";
+import { log } from "@/logger/index.js";
 import {
 	printApprovalWarning,
 	printError,
@@ -20,9 +16,9 @@ import {
 	printSafetyReport,
 	printSql,
 	printSummary,
-} from "../output/index.js";
-import { getApprovalReasons, validateSql } from "../safety/index.js";
-import { loadSchema, schemaToContext } from "../schema/index.js";
+} from "@/output/index.js";
+import { getApprovalReasons, validateSql } from "@/safety/index.js";
+import { loadSchema, schemaToContext } from "@/schema/index.js";
 import {
 	initTelemetry,
 	shutdownTelemetry,
@@ -31,14 +27,15 @@ import {
 	trackHumanApproval,
 	trackQuery,
 	trackQueryRejected,
-} from "../telemetry/index.js";
+} from "@/telemetry/index.js";
 import type {
 	DatabaseSchema,
 	LLMProvider,
 	QueryMetrics,
+	QueryResult,
 	SqlGenerationResult,
 	SummaryResult,
-} from "../types/index.js";
+} from "@/types/index.js";
 
 export interface AskOptions {
 	metrics?: boolean;
@@ -203,7 +200,7 @@ export async function askCommand(
 
 	// ── Execute query ─────────────────────────────────────────────────────────────
 	const execSpinner = ora("Executing query...").start();
-	let queryResult;
+	let queryResult: QueryResult;
 
 	try {
 		queryResult = await executeQuery(databaseUrl, safetyReport.processedSql);

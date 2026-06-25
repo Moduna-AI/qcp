@@ -1,5 +1,5 @@
 import postgres from "postgres";
-import type { QueryResult } from "../types/index.js";
+import type { QueryResult } from "@/types/index.js";
 
 let _sql: ReturnType<typeof postgres> | null = null;
 

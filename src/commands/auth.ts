@@ -6,17 +6,17 @@ import {
 	DEFAULT_MODELS,
 	loadConfig,
 	saveConfig,
-} from "../config/index.js";
-import { createProvider } from "../llm/index.js";
+} from "@/config/index.js";
+import { createProvider } from "@/llm/index.js";
 import {
 	printBanner,
 	printError,
 	printInfo,
 	printSection,
 	printSuccess,
-} from "../output/index.js";
-import { trackProviderSelected } from "../telemetry/index.js";
-import type { ProviderName } from "../types/index.js";
+} from "@/output/index.js";
+import { trackProviderSelected } from "@/telemetry/index.js";
+import type { ProviderName } from "@/types/index.js";
 
 const PROVIDER_INFO: Record<
 	ProviderName,

@@ -8,8 +8,8 @@
 
 import chalk from "chalk";
 import { Command } from "commander";
-import { printBanner } from "../output/index.js";
-import { QCP_FULL_NAME, QCP_REPO, QCP_VERSION } from "../version.js";
+import { printBanner } from "@/output/index.js";
+import { QCP_FULL_NAME, QCP_REPO, QCP_VERSION } from "@/version.js";
 
 const program = new Command();
 
