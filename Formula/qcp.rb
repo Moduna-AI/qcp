@@ -22,7 +22,7 @@ class Qcp < Formula
   on_macos do
     on_arm do
       url "https://github.com/Moduna-AI/qcp/releases/download/v#{version}/qcp-macos-arm64"
-      sha256 "PLACEHOLDER_SHA256_MACOS_ARM64"
+      sha256 "ee11cbd63e9590dcad8a3991ffbf6fcca9bd6fd9b708be843df5b4d184481bd5"
     end
 
   end
@@ -30,12 +30,12 @@ class Qcp < Formula
   on_linux do
     on_intel do
       url "https://github.com/Moduna-AI/qcp/releases/download/v#{version}/qcp-linux-x64"
-      sha256 "PLACEHOLDER_SHA256_LINUX_X64"
+      sha256 "8dbf2d7331259956f87148b6036f98d6b3495a4eafa204e2cdf145d0b3c1c0f7"
     end
 
     on_arm do
       url "https://github.com/Moduna-AI/qcp/releases/download/v#{version}/qcp-linux-arm64"
-      sha256 "PLACEHOLDER_SHA256_LINUX_ARM64"
+      sha256 "220c67c2acd4b07bc6dbc5667ad4497a1ce5bab4595ace45ea71b62772efbd90"
     end
   end
 
