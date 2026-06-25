@@ -1,6 +1,6 @@
 {
 	"name": "@moduna/qcp",
-	"version": "0.1.1-alpha.14",
+	"version": "0.1.1-beta.0",
 	"description": "AI-powered CLI for querying PostgreSQL in natural language",
 	"type": "module",
 	"bin": {
@@ -56,7 +56,7 @@
 		"node": ">=18.0.0"
 	},
 	"dependencies": {
-		"@anthropic-ai/sdk": "^0.105.0",
+		"@anthropic-ai/sdk": "^0.106.0",
 		"@google/generative-ai": "^0.24.0",
 		"@types/uuid": "^11.0.0",
 		"archiver": "^8.0.0",
@@ -65,11 +65,11 @@
 		"commander": "^15.0.0",
 		"dotenv": "^17.4.2",
 		"inquirer": "^14.0.2",
-		"openai": "^6.0.0",
+		"openai": "^6.45.0",
 		"ora": "^9.4.1",
 		"pgsql-ast-parser": "^12.0.2",
 		"postgres": "^3.4.9",
-		"posthog-node": "^5.0.0",
+		"posthog-node": "^5.38.5",
 		"uuid": "^14.0.1",
 		"winston": "^3.17.0",
 		"zod": "^4.4.3"
