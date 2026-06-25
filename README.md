@@ -67,7 +67,7 @@ Most data questions never get answered because they require SQL knowledge or dat
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew tap Moduna-AI/qcp https://github.com/Moduna-AI/qcp
+brew tap moduna-ai/qcp
 brew install qcp
 ```
 
