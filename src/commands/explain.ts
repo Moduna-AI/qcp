@@ -129,7 +129,7 @@ export async function explainCommand(
 		printInfo("This query would be rejected before execution.");
 	} else {
 		console.log();
-		printInfo('Run `qcp ask "' + question + '"` to execute this query');
+		printInfo(`Run \`qcp ask "${question}"\` to execute this query`);
 	}
 
 	log("info", "Explain completed", { question });
