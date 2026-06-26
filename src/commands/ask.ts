@@ -104,7 +104,7 @@ export async function askCommand(
 	let sqlResult: SqlGenerationResult;
 
 	try {
-		sqlResult = await provider!.generateSql(question, schema!, (chunk) => {
+		sqlResult = await provider.generateSql(question, schema, (chunk) => {
 			if (options.debug) process.stderr.write(chalk.dim(chunk));
 		});
 		sqlSpinner.succeed("SQL generated");
@@ -119,17 +119,17 @@ export async function askCommand(
 
 	if (options.debug) {
 		console.log(chalk.dim("\n── Raw SQL from LLM ──"));
-		console.log(chalk.dim(sqlResult!.sql));
+		console.log(chalk.dim(sqlResult.sql));
 		console.log(chalk.dim("─────────────────────\n"));
 	}
 
 	// ── Display SQL ───────────────────────────────────────────────────────────────
 	if (config.showSql) {
-		printSql(sqlResult!.sql);
+		printSql(sqlResult.sql);
 	}
 
 	// ── Safety validation (AST) ───────────────────────────────────────────────────
-	const safetyReport = validateSql(sqlResult!.sql);
+	const safetyReport = validateSql(sqlResult.sql);
 	printSafetyReport(safetyReport);
 
 	if (!safetyReport.safe) {
@@ -216,17 +216,17 @@ export async function askCommand(
 		process.exit(1);
 	}
 
-	printResults(queryResult!);
+	printResults(queryResult);
 
 	// ── Generate summary ──────────────────────────────────────────────────────────
 	let summaryResult: SummaryResult | undefined;
 	const summarySpinner = ora("Generating summary...").start();
 
 	try {
-		summaryResult = await provider!.generateSummary(
+		summaryResult = await provider.generateSummary(
 			question,
 			safetyReport.processedSql,
-			queryResult!,
+			queryResult,
 			(chunk) => {
 				if (options.debug) process.stderr.write(chalk.dim(chunk));
 			},
@@ -237,12 +237,12 @@ export async function askCommand(
 	}
 
 	if (summaryResult) printSummary(summaryResult.summary);
-	if (sqlResult!.explanation) printExplanation(sqlResult!.explanation);
+	if (sqlResult.explanation) printExplanation(sqlResult.explanation);
 
 	// ── Telemetry ─────────────────────────────────────────────────────────────────
 	const totalMs =
-		sqlResult!.latencyMs +
-		queryResult!.executionTimeMs +
+		sqlResult.latencyMs +
+		queryResult.executionTimeMs +
 		(summaryResult?.latencyMs ?? 0);
 
 	trackQuery({
@@ -254,11 +254,11 @@ export async function askCommand(
 	// ── Metrics ───────────────────────────────────────────────────────────────────
 	if (options.metrics || options.verbose || config.showMetrics) {
 		const metrics: QueryMetrics = {
-			tokensIn: (sqlResult!.tokensIn ?? 0) + (summaryResult?.tokensIn ?? 0),
-			tokensOut: (sqlResult!.tokensOut ?? 0) + (summaryResult?.tokensOut ?? 0),
+			tokensIn: (sqlResult.tokensIn ?? 0) + (summaryResult?.tokensIn ?? 0),
+			tokensOut: (sqlResult.tokensOut ?? 0) + (summaryResult?.tokensOut ?? 0),
 			totalLatencyMs: totalMs,
-			sqlGenerationMs: sqlResult!.latencyMs,
-			executionMs: queryResult!.executionTimeMs,
+			sqlGenerationMs: sqlResult.latencyMs,
+			executionMs: queryResult.executionTimeMs,
 			summaryMs: summaryResult?.latencyMs ?? 0,
 			provider: config.provider,
 			model: config.model,
@@ -269,7 +269,7 @@ export async function askCommand(
 	log("info", "Query completed", {
 		provider: config.provider,
 		model: config.model,
-		rows: queryResult!.rowCount,
+		rows: queryResult.rowCount,
 		latencyMs: totalMs,
 	});
 
