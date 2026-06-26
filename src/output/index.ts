@@ -168,7 +168,7 @@ export function printMetrics(metrics: QueryMetrics): void {
 export function printError(message: string, detail?: string): void {
 	console.error(chalk.red("\n  ✗ Error: ") + chalk.white(message));
 	if (detail) {
-		console.error(chalk.dim("    " + detail.replace(/\n/g, "\n    ")));
+		console.error(chalk.dim(`    ${detail.replace(/\n/g, "\n    ")}`));
 	}
 }
 
@@ -205,5 +205,5 @@ export function printDoctorCheck(
 // ─── Section headers ──────────────────────────────────────────────────────────
 
 export function printSection(title: string): void {
-	console.log("\n" + chalk.bold.white(title + ":"));
+	console.log(`\n${chalk.bold.white(`${title}:`)}`);
 }
