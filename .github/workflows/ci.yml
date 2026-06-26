@@ -6,6 +6,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+# Explicitly limit repository permissions for security
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test (${{ matrix.os }})
@@ -24,10 +28,21 @@ jobs:
         with:
           bun-version: latest
 
+      # Explicitly cache Bun's global cache directory across runs
+      - name: Cache Bun dependencies
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Optimizing compute cost: run lint/typecheck only on Linux
       - name: Type check
+        if: matrix.os == 'ubuntu-latest'
         run: bun run lint
 
       - name: Run tests
@@ -37,7 +52,11 @@ jobs:
     name: Build binary (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     needs: test
-    if: github.ref == 'refs/heads/main'
+    # Evaluates correctly on both direct pushes and pull requests targeting main/release branches
+    if: |
+      github.ref_name == 'main' || 
+      github.base_ref == 'main' || 
+      startsWith(github.base_ref, 'release/')
     strategy:
       fail-fast: false
       matrix:
@@ -60,6 +79,15 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+
+      # Reuse the cache configuration for the build runners
+      - name: Cache Bun dependencies
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lockb', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
