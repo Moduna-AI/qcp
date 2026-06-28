@@ -97,10 +97,12 @@ ${chalk.bold("Tip:")} Create a read-only role for maximum safety:
   GRANT SELECT ON ALL TABLES IN SCHEMA public TO qcp_readonly;
 `,
 	)
-	.action(async (databaseUrl: string | undefined, options: { type?: string }) => {
-		const { connectCommand } = await import("../commands/connect.js");
-		await connectCommand(databaseUrl, { type: options.type });
-	});
+	.action(
+		async (databaseUrl: string | undefined, options: { type?: string }) => {
+			const { connectCommand } = await import("../commands/connect.js");
+			await connectCommand(databaseUrl, { type: options.type });
+		},
+	);
 
 // ─── schema ───────────────────────────────────────────────────────────────────
 

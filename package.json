@@ -26,6 +26,7 @@
 		"build:all-binaries": "bun run build:binary:macos-arm64 && bun run build:binary:linux-x64 && bun run build:binary:linux-arm64 && bun run build:binary:windows-x64",
 		"test": "bun test",
 		"test:watch": "bun test --watch",
+		"type-check": "bunx tsc --noEmit",
 		"lint": "bunx tsc --noEmit",
 		"prepublishOnly": "bun run build",
 		"format": "biome format --write .",
@@ -59,6 +60,7 @@
 		"@anthropic-ai/sdk": "^0.106.0",
 		"@google/generative-ai": "^0.24.0",
 		"@mastra/core": "^1.47.0",
+		"@mastra/mcp": "^1.12.0",
 		"@types/uuid": "^11.0.0",
 		"archiver": "^8.0.0",
 		"chalk": "^5.3.0",
@@ -71,6 +73,7 @@
 		"pgsql-ast-parser": "^12.0.2",
 		"postgres": "^3.4.9",
 		"posthog-node": "^5.38.5",
+		"prisma": "^7.8.0",
 		"uuid": "^14.0.1",
 		"winston": "^3.17.0",
 		"zod": "^4"

@@ -43,6 +43,7 @@ import type {
 	QueryResult,
 	SqlGenerationResult,
 } from "@/types/index.js";
+import { handlePrismaQuestion, shouldUsePrismaAgent } from "./prisma-query.js";
 
 const HELP_COMMANDS = new Set(["/help", "?", "help"]);
 const EXIT_COMMANDS = new Set([
@@ -210,6 +211,19 @@ async function _handleQuestion(
 	databaseUrl: string,
 	options: ChatOptions,
 ): Promise<void> {
+	if (shouldUsePrismaAgent(config)) {
+		await handlePrismaQuestion({
+			question,
+			schema: session.schema,
+			config,
+			databaseUrl,
+			provider: session.provider,
+			commandName: "chat",
+			options,
+		});
+		return;
+	}
+
 	// Generate SQL
 	const sqlSpinner = ora("Generating SQL...").start();
 	let sqlResult: SqlGenerationResult;

@@ -36,6 +36,7 @@ import type {
 	SqlGenerationResult,
 	SummaryResult,
 } from "@/types/index.js";
+import { handlePrismaQuestion, shouldUsePrismaAgent } from "./prisma-query.js";
 
 export interface AskOptions {
 	metrics?: boolean;
@@ -56,10 +57,7 @@ export async function askCommand(
 
 	const databaseUrl = getDatabaseUrl(config);
 	if (!databaseUrl) {
-		printError(
-			"No database connection configured.",
-			"Run: qcp connect",
-		);
+		printError("No database connection configured.", "Run: qcp connect");
 		await shutdownTelemetry();
 		process.exit(1);
 	}
@@ -98,6 +96,21 @@ export async function askCommand(
 	}
 
 	printQuestion(question);
+
+	if (shouldUsePrismaAgent(config)) {
+		const completed = await handlePrismaQuestion({
+			question,
+			schema,
+			config,
+			databaseUrl,
+			provider,
+			commandName: "ask",
+			options,
+		});
+		await shutdownTelemetry();
+		if (!completed) process.exit(1);
+		return;
+	}
 
 	// ── Generate SQL ──────────────────────────────────────────────────────────────
 	const sqlSpinner = ora("Generating SQL...").start();

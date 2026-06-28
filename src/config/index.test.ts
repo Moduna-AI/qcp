@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	createDefaultConfig,
+	getDatabaseUrl,
 	inferDatabaseType,
 	isDatabaseType,
 	parseQcpConfig,
@@ -46,6 +47,47 @@ describe("database type config", () => {
 			}),
 		).toThrow();
 	});
+
+	test("prefers PRISMA_DATABASE_URL for Prisma Postgres", () => {
+		const originalPrisma = process.env.PRISMA_DATABASE_URL;
+		const originalDatabase = process.env.DATABASE_URL;
+		const originalQcp = process.env.QCP_DATABASE_URL;
+
+		process.env.PRISMA_DATABASE_URL =
+			"postgres://prisma_user:pass@db.prisma.io/app";
+		process.env.DATABASE_URL = "postgres://database-url/app";
+		process.env.QCP_DATABASE_URL = "postgres://qcp-database-url/app";
+
+		try {
+			const config = parseQcpConfig({
+				databaseType: "prisma-postgres",
+				databaseUrl: "postgres://configured/app",
+			});
+
+			expect(getDatabaseUrl(config)).toBe(process.env.PRISMA_DATABASE_URL);
+		} finally {
+			restoreEnv("PRISMA_DATABASE_URL", originalPrisma);
+			restoreEnv("DATABASE_URL", originalDatabase);
+			restoreEnv("QCP_DATABASE_URL", originalQcp);
+		}
+	});
+
+	test("keeps configured URL precedence for non-Prisma databases", () => {
+		const originalPrisma = process.env.PRISMA_DATABASE_URL;
+		process.env.PRISMA_DATABASE_URL =
+			"postgres://prisma_user:pass@db.prisma.io/app";
+
+		try {
+			const config = parseQcpConfig({
+				databaseType: "other-postgres",
+				databaseUrl: "postgres://configured/app",
+			});
+
+			expect(getDatabaseUrl(config)).toBe("postgres://configured/app");
+		} finally {
+			restoreEnv("PRISMA_DATABASE_URL", originalPrisma);
+		}
+	});
 });
 
 describe("database type inference", () => {
@@ -56,9 +98,9 @@ describe("database type inference", () => {
 	});
 
 	test("infers Neon URLs", () => {
-		expect(inferDatabaseType("postgres://user:pass@ep-blue.neon.tech/app")).toBe(
-			"neon",
-		);
+		expect(
+			inferDatabaseType("postgres://user:pass@ep-blue.neon.tech/app"),
+		).toBe("neon");
 	});
 
 	test("infers Supabase URLs", () => {
@@ -78,3 +120,12 @@ describe("database type inference", () => {
 		).toBe("neon");
 	});
 });
+
+function restoreEnv(key: string, value: string | undefined): void {
+	if (value === undefined) {
+		delete process.env[key];
+		return;
+	}
+
+	process.env[key] = value;
+}
