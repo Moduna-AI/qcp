@@ -1,5 +1,10 @@
 import chalk from "chalk";
-import { CONFIG_PATH, loadConfig, saveConfig } from "@/config/index.js";
+import {
+	CONFIG_PATH,
+	isDatabaseType,
+	loadConfig,
+	saveConfig,
+} from "@/config/index.js";
 import { printError, printSection, printSuccess } from "@/output/index.js";
 import type { ProviderName } from "@/types/index.js";
 
@@ -17,6 +22,7 @@ export function configShowCommand(): void {
 	console.log();
 	console.log(`  Provider:     ${chalk.bold(config.provider)}`);
 	console.log(`  Model:        ${chalk.bold(config.model)}`);
+	console.log(`  Database:     ${chalk.bold(config.databaseType)}`);
 	console.log();
 	console.log(`  Safe mode:    ${boolLabel(config.safeMode)}`);
 	console.log(`  Show SQL:     ${boolLabel(config.showSql)}`);
@@ -58,9 +64,23 @@ export function configSetCommand(key: string, value: string): void {
 		return;
 	}
 
+	if (key === "databaseType") {
+		if (!isDatabaseType(value)) {
+			printError(
+				`Invalid database type: ${value}`,
+				"Valid types: prisma-postgres, neon, supabase, oracle-postgres, other-postgres",
+			);
+			process.exit(1);
+		}
+
+		saveConfig({ ...config, databaseType: value });
+		printSuccess(`${key} = ${value}`);
+		return;
+	}
+
 	printError(
 		`Unknown config key: ${key}`,
-		`Settable options: ${[...SETTABLE_BOOLEANS, ...SETTABLE_STRINGS].join(", ")}`,
+		`Settable options: ${[...SETTABLE_BOOLEANS, ...SETTABLE_STRINGS, "databaseType"].join(", ")}`,
 	);
 	process.exit(1);
 }
