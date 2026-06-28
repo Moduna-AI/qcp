@@ -3,9 +3,9 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 import ora from "ora";
 import {
+	getDatabaseUrl,
 	inferDatabaseType,
 	isDatabaseType,
-	getDatabaseUrl,
 	loadConfig,
 	saveConfig,
 } from "@/config/index.js";
@@ -165,7 +165,9 @@ export async function connectCommand(
 	}
 }
 
-function parseDatabaseTypeOption(type: string | undefined): DatabaseType | undefined {
+function parseDatabaseTypeOption(
+	type: string | undefined,
+): DatabaseType | undefined {
 	if (!type) return undefined;
 
 	if (isDatabaseType(type)) return type;
@@ -187,20 +189,26 @@ async function resolveInteractiveSetup(
 			url,
 			databaseType:
 				selectedType ??
-				(url ? inferDatabaseType(url, config.databaseType) : config.databaseType),
+				(url
+					? inferDatabaseType(url, config.databaseType)
+					: config.databaseType),
 		};
 	}
 
-	const { databaseType } = await inquirer.prompt<{ databaseType: DatabaseType }>([
+	const { databaseType } = await inquirer.prompt<{
+		databaseType: DatabaseType;
+	}>([
 		{
 			type: "select",
 			name: "databaseType",
 			message: "Select your database:",
 			default: selectedType ?? config.databaseType,
-			choices: (Object.keys(DATABASE_TYPE_INFO) as DatabaseType[]).map((type) => ({
-				name: `${DATABASE_TYPE_INFO[type].label} — ${DATABASE_TYPE_INFO[type].description}`,
-				value: type,
-			})),
+			choices: (Object.keys(DATABASE_TYPE_INFO) as DatabaseType[]).map(
+				(type) => ({
+					name: `${DATABASE_TYPE_INFO[type].label} — ${DATABASE_TYPE_INFO[type].description}`,
+					value: type,
+				}),
+			),
 		},
 	]);
 

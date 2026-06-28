@@ -97,9 +97,7 @@ export async function initCommand(): Promise<void> {
 		}
 
 		printSuccess("Created .qcp/ project directory");
-		printInfo(
-			"Run `qcp connect` to add your database connection",
-		);
+		printInfo("Run `qcp connect` to add your database connection");
 		printInfo("Run `qcp schema scan` to scan your database schema");
 	} else {
 		printInfo(".qcp/ project directory already exists");

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import "dotenv/config";
 import { v7 as uuidv7 } from "uuid";
 import { z } from "zod";
 import type { DatabaseType, ProviderName, QcpConfig } from "@/types/index.js";
@@ -173,6 +174,15 @@ export function setApiKey(provider: ProviderName, key: string): void {
 }
 
 export function getDatabaseUrl(config: QcpConfig): string | undefined {
+	if (config.databaseType === "prisma-postgres") {
+		return (
+			process.env.PRISMA_DATABASE_URL ??
+			config.databaseUrl ??
+			process.env.DATABASE_URL ??
+			process.env.QCP_DATABASE_URL
+		);
+	}
+
 	return (
 		config.databaseUrl ??
 		process.env.DATABASE_URL ??
