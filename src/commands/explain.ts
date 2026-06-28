@@ -36,7 +36,7 @@ export async function explainCommand(
 
 	const databaseUrl = getDatabaseUrl(config);
 	if (!databaseUrl) {
-		printError("No database connection configured.", "Run: qcp connect <url>");
+		printError("No database connection configured.", "Run: qcp connect");
 		await shutdownTelemetry();
 		process.exit(1);
 	}

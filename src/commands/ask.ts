@@ -58,7 +58,7 @@ export async function askCommand(
 	if (!databaseUrl) {
 		printError(
 			"No database connection configured.",
-			"Run: qcp connect postgres://user:pass@host/db",
+			"Run: qcp connect",
 		);
 		await shutdownTelemetry();
 		process.exit(1);

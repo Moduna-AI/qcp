@@ -77,7 +77,7 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 
 	const databaseUrl = getDatabaseUrl(config);
 	if (!databaseUrl) {
-		printError("No database connection configured.", "Run: qcp connect <url>");
+		printError("No database connection configured.", "Run: qcp connect");
 		await shutdownTelemetry();
 		process.exit(1);
 	}

@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { v7 as uuidv7 } from "uuid";
 import { z } from "zod";
-import type { ProviderName, QcpConfig } from "@/types/index.js";
+import type { DatabaseType, ProviderName, QcpConfig } from "@/types/index.js";
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
 
@@ -22,9 +22,20 @@ const ApiKeysSchema = z.object({
 	anthropic: z.string().optional(),
 });
 
+export const DATABASE_TYPES = [
+	"prisma-postgres",
+	"neon",
+	"supabase",
+	"oracle-postgres",
+	"other-postgres",
+] as const satisfies readonly DatabaseType[];
+
+const DatabaseTypeSchema = z.enum(DATABASE_TYPES);
+
 const QcpConfigSchema = z.object({
 	version: z.string().default("0.1.0"),
 	installId: z.string().default(() => uuidv7()),
+	databaseType: DatabaseTypeSchema.default("other-postgres"),
 	databaseUrl: z.string().optional(),
 	provider: z
 		.enum(["gemini", "openai", "anthropic", "ollama"])
@@ -112,7 +123,7 @@ export function loadConfig(): QcpConfig {
 			console.warn(
 				"Config validation warning; using defaults for invalid fields.",
 			);
-			return QcpConfigSchema.parse({ ...parsed });
+			return parseQcpConfig(parsed);
 		}
 		return result.data as QcpConfig;
 	} catch {
@@ -132,6 +143,10 @@ export function saveConfig(config: Partial<QcpConfig>): QcpConfig {
 export function createDefaultConfig(): QcpConfig {
 	const config = QcpConfigSchema.parse({}) as QcpConfig;
 	return config;
+}
+
+export function parseQcpConfig(config: unknown): QcpConfig {
+	return QcpConfigSchema.parse(config) as QcpConfig;
 }
 
 // ─── Getters / Setters ────────────────────────────────────────────────────────
@@ -165,6 +180,41 @@ export function getDatabaseUrl(config: QcpConfig): string | undefined {
 	);
 }
 
+export function isDatabaseType(value: string): value is DatabaseType {
+	return DATABASE_TYPES.includes(value as DatabaseType);
+}
+
+export function inferDatabaseType(
+	databaseUrl: string,
+	fallback: DatabaseType = "other-postgres",
+): DatabaseType {
+	const lowerUrl = databaseUrl.toLowerCase();
+
+	if (lowerUrl.includes("prisma.io") || lowerUrl.includes("prisma-data.net")) {
+		return "prisma-postgres";
+	}
+
+	if (lowerUrl.includes("neon.tech") || lowerUrl.includes("neon.build")) {
+		return "neon";
+	}
+
+	if (
+		lowerUrl.includes("supabase.co") ||
+		lowerUrl.includes("pooler.supabase.com")
+	) {
+		return "supabase";
+	}
+
+	if (
+		lowerUrl.includes("oraclecloud.com") ||
+		lowerUrl.includes("oci.oraclecloud.com")
+	) {
+		return "oracle-postgres";
+	}
+
+	return fallback;
+}
+
 // ─── Local project helpers ────────────────────────────────────────────────────
 
 export function ensureLocalDir(): void {
@@ -183,6 +233,7 @@ export function redactConfig(config: QcpConfig): Record<string, unknown> {
 	return {
 		version: config.version,
 		installId: config.installId,
+		databaseType: config.databaseType,
 		provider: config.provider,
 		model: config.model,
 		telemetry: config.telemetry,

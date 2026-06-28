@@ -102,7 +102,7 @@ async function checkDatabase(
 			{
 				name: "Database connection",
 				status: "warning",
-				message: "Not configured. Run: qcp connect <url>",
+				message: "Not configured. Run: qcp connect",
 			},
 		];
 	}
@@ -305,6 +305,7 @@ export async function doctorCommand(
 				connected: databaseChecks.some(
 					(c) => c.name === "Connected" && c.status === "healthy",
 				),
+				type: config.databaseType,
 				readonly: true,
 				schemaScanned: existsSync(LOCAL_SCHEMA_PATH),
 			},

@@ -24,7 +24,7 @@ program
 		`
 ${chalk.bold("Quick start:")}
   ${chalk.cyan("qcp auth")}                       Set up your AI provider API key
-  ${chalk.cyan("qcp connect")} ${chalk.dim("<postgres-url>")}   Connect to PostgreSQL
+  ${chalk.cyan("qcp connect")}                    Connect to your database
   ${chalk.cyan("qcp schema scan")}                Index your database schema
   ${chalk.cyan("qcp ask")} ${chalk.dim('"Your question"')}       Query in plain English
   ${chalk.cyan("qcp chat")}                       Start interactive assistant mode
@@ -77,12 +77,18 @@ program
 
 program
 	.command("connect [database-url]")
-	.description("Connect to a PostgreSQL database")
+	.description("Connect to a PostgreSQL-compatible database")
+	.option(
+		"--type <database-type>",
+		"Database type: prisma-postgres, neon, supabase, oracle-postgres, other-postgres",
+	)
 	.addHelpText(
 		"after",
 		`
 ${chalk.bold("Example:")}
+  qcp connect
   qcp connect postgres://readonly_user:password@host:5432/mydb
+  qcp connect --type neon postgres://readonly_user:password@host/db
 
 ${chalk.bold("Tip:")} Create a read-only role for maximum safety:
   CREATE ROLE qcp_readonly;
@@ -91,9 +97,9 @@ ${chalk.bold("Tip:")} Create a read-only role for maximum safety:
   GRANT SELECT ON ALL TABLES IN SCHEMA public TO qcp_readonly;
 `,
 	)
-	.action(async (databaseUrl?: string) => {
+	.action(async (databaseUrl: string | undefined, options: { type?: string }) => {
 		const { connectCommand } = await import("../commands/connect.js");
-		await connectCommand(databaseUrl);
+		await connectCommand(databaseUrl, { type: options.type });
 	});
 
 // ─── schema ───────────────────────────────────────────────────────────────────
@@ -265,6 +271,7 @@ ${chalk.bold("Keys:")}
   showMetrics  true/false   Always show timing/token metrics
   telemetry    true/false   Anonymous usage analytics
   ollamaHost   URL          Ollama server (default: http://localhost:11434)
+  databaseType prisma-postgres/neon/supabase/oracle-postgres/other-postgres
 `,
 	)
 	.action(async (key: string, value: string) => {
