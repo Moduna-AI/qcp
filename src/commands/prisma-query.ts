@@ -6,6 +6,7 @@ import {
 	executeSecurePrismaReadQuery,
 	generateSqlWithPrismaAgent,
 } from "@/agents/prisma-agent.js";
+import { isPromptViolationError } from "@/llm/prompts.js";
 import { log } from "@/logger/index.js";
 import {
 	printApprovalWarning,
@@ -13,6 +14,7 @@ import {
 	printExplanation,
 	printInfo,
 	printMetrics,
+	printPromptViolation,
 	printResults,
 	printSafetyReport,
 	printSql,
@@ -214,6 +216,11 @@ async function generateSql(
 		return result;
 	} catch (err: unknown) {
 		spinner.fail("Prisma agent SQL generation failed");
+		if (isPromptViolationError(err)) {
+			printPromptViolation(err.violation);
+			trackQueryRejected(`${err.violation.category}_prompt_violation`);
+			return undefined;
+		}
 		const message = err instanceof Error ? err.message : String(err);
 		printError(message);
 		trackError(input.commandName, "prisma_sql_generation_failed");

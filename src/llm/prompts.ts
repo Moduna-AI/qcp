@@ -1,5 +1,23 @@
 import { schemaToContext } from "@/schema/index.js";
+import { classifyPromptViolation } from "@/safety/index.js";
 import type { DatabaseSchema, QueryResult } from "@/types/index.js";
+import type { PromptViolationReport } from "@/types/index.js";
+
+export class PromptViolationError extends Error {
+	readonly violation: PromptViolationReport;
+
+	constructor(violation: PromptViolationReport) {
+		super(violation.message);
+		this.name = "PromptViolationError";
+		this.violation = violation;
+	}
+}
+
+export function isPromptViolationError(
+	error: unknown,
+): error is PromptViolationError {
+	return error instanceof PromptViolationError;
+}
 
 // ─── System prompts ───────────────────────────────────────────────────────────
 
@@ -102,6 +120,11 @@ export function extractSqlAndExplanation(rawText: string): {
 	const explanation = explanationMatch ? explanationMatch[1].trim() : "";
 
 	if (!sql) {
+		const violation = classifyPromptViolation(rawText);
+		if (violation) {
+			throw new PromptViolationError(violation);
+		}
+
 		throw new Error(
 			"Could not extract SQL from the model response. " +
 				"Try rephrasing your question or running with --debug to see the raw output.",
