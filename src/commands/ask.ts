@@ -1,30 +1,18 @@
-import chalk from "chalk";
 import inquirer from "inquirer";
 import ora from "ora";
+import { QcpSupervisorAgent } from "@/agents/index.js";
 import { ensureConfigDir, getDatabaseUrl, loadConfig } from "@/config/index.js";
-import { executeQuery, explainQuery } from "@/db/index.js";
-import { createProvider } from "@/llm/index.js";
-import { isPromptViolationError } from "@/llm/prompts.js";
 import { log } from "@/logger/index.js";
 import {
 	printApprovalWarning,
 	printError,
-	printExplanation,
 	printInfo,
 	printMetrics,
 	printPromptViolation,
 	printQuestion,
-	printResults,
-	printSafetyReport,
-	printSql,
 	printSummary,
 } from "@/output/index.js";
-import {
-	classifyPromptViolation,
-	getApprovalReasons,
-	sanitizeSensitiveData,
-	validateSql,
-} from "@/safety/index.js";
+import { classifyPromptViolation } from "@/safety/index.js";
 import { loadSchema, schemaToContext } from "@/schema/index.js";
 import {
 	initTelemetry,
@@ -36,14 +24,10 @@ import {
 	trackQueryRejected,
 } from "@/telemetry/index.js";
 import type {
+	ApprovalReason,
 	DatabaseSchema,
-	LLMProvider,
 	QueryMetrics,
-	QueryResult,
-	SqlGenerationResult,
-	SummaryResult,
 } from "@/types/index.js";
-import { handlePrismaQuestion, shouldUsePrismaAgent } from "./prisma-query.js";
 
 export interface AskOptions {
 	metrics?: boolean;
@@ -87,12 +71,21 @@ export async function askCommand(
 		process.exit(1);
 	}
 
-	// ── Create LLM provider ───────────────────────────────────────────────────────
-	let provider: LLMProvider;
+	// ── Create supervisor agent ───────────────────────────────────────────────────
+	let supervisor: QcpSupervisorAgent;
 	try {
-		provider = createProvider(config);
+		supervisor = new QcpSupervisorAgent({
+			config,
+			databaseUrl,
+			schema,
+			approvalHandler: async (reasons, sql) =>
+				confirmAskToolExecution(reasons, sql, config, options),
+		});
 		if (options.verbose || options.debug) {
 			printInfo(`Provider: ${config.provider} / ${config.model}`);
+			printInfo(
+				`Database subagent: ${supervisor.getDatabaseAgent().getName()}`,
+			);
 		}
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -112,207 +105,76 @@ export async function askCommand(
 		process.exit(1);
 	}
 
-	if (shouldUsePrismaAgent(config)) {
-		const completed = await handlePrismaQuestion({
-			question,
-			schema,
-			config,
-			databaseUrl,
-			provider,
-			commandName: "ask",
-			options,
-		});
-		await shutdownTelemetry();
-		if (!completed) process.exit(1);
-		return;
-	}
-
-	// ── Generate SQL ──────────────────────────────────────────────────────────────
-	const sqlSpinner = ora("Generating SQL...").start();
-	let sqlResult: SqlGenerationResult;
-
+	// ── Ask supervisor ────────────────────────────────────────────────────────────
+	const responseSpinner = ora("Thinking...").start();
 	try {
-		sqlResult = await provider.generateSql(question, schema, (chunk) => {
-			if (options.debug) process.stderr.write(chalk.dim(chunk));
-		});
-		sqlSpinner.succeed("SQL generated");
-	} catch (err: unknown) {
-		sqlSpinner.fail("SQL generation failed");
-		if (isPromptViolationError(err)) {
-			printPromptViolation(err.violation);
-			trackQueryRejected(`${err.violation.category}_prompt_violation`);
-			await shutdownTelemetry();
-			process.exit(1);
-		}
-		const message = err instanceof Error ? err.message : String(err);
-		printError(message);
-		trackError("ask", "sql_generation_failed");
-		await shutdownTelemetry();
-		process.exit(1);
-	}
+		const response = await supervisor.generateResponse(question);
+		responseSpinner.succeed(response.direct ? "Ready" : "Done");
+		printSummary(response.text);
 
-	if (options.debug) {
-		console.log(chalk.dim("\n── Raw SQL from LLM ──"));
-		console.log(chalk.dim(sqlResult.sql));
-		console.log(chalk.dim("─────────────────────\n"));
-	}
-
-	// ── Display SQL ───────────────────────────────────────────────────────────────
-	if (config.showSql) {
-		printSql(sqlResult.sql);
-	}
-
-	// ── Safety validation (AST) ───────────────────────────────────────────────────
-	const safetyReport = validateSql(sqlResult.sql);
-	printSafetyReport(safetyReport);
-
-	if (!safetyReport.safe) {
-		console.log();
-		printError("Query rejected — does not meet safety requirements.");
-		trackQueryRejected("safety_validation_failed");
-		await shutdownTelemetry();
-		process.exit(1);
-	}
-
-	if (options.debug) {
-		console.log(chalk.dim("── Processed SQL ──"));
-		console.log(chalk.dim(safetyReport.processedSql));
-		console.log();
-	}
-
-	// ── EXPLAIN plan (for cost check in safe mode) ────────────────────────────────
-	let estimatedRows: number | undefined;
-	const safeMode = options.safeMode ?? config.safeMode;
-
-	if (safeMode || options.debug) {
-		try {
-			const explain = await explainQuery(
-				databaseUrl,
-				safetyReport.processedSql,
-			);
-			estimatedRows = explain.estimatedRows;
-			if (options.debug) {
-				console.log(chalk.dim("\n── EXPLAIN Plan ──"));
-				console.log(chalk.dim(explain.plan.slice(0, 1200)));
-				console.log();
-			}
-		} catch {
-			// Non-fatal — EXPLAIN failure doesn't block execution
-		}
-	}
-
-	// ── Human-in-the-loop approval ────────────────────────────────────────────────
-	if (safeMode && !options.noConfirm) {
-		const approvalReasons = getApprovalReasons(
-			safetyReport.processedSql,
-			safetyReport,
-			config.sensitiveTablePatterns,
-			estimatedRows,
-		);
-
-		if (approvalReasons.length > 0) {
-			printApprovalWarning(approvalReasons);
-			const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([
-				{
-					type: "confirm",
-					name: "confirmed",
-					message: "Execute this query?",
-					default: false,
-				},
-			]);
-
-			trackHumanApproval(confirmed);
-
-			if (!confirmed) {
-				console.log();
-				printInfo("Query cancelled.");
-				await shutdownTelemetry();
-				process.exit(0);
-			}
-		}
-	}
-
-	// ── Execute query ─────────────────────────────────────────────────────────────
-	const execSpinner = ora("Executing query...").start();
-	let queryResult: QueryResult;
-
-	try {
-		queryResult = await executeQuery(databaseUrl, safetyReport.processedSql);
-		execSpinner.succeed(
-			`Query executed · ${queryResult.rowCount} row(s) · ${queryResult.executionTimeMs}ms`,
-		);
-	} catch (err: unknown) {
-		execSpinner.fail("Query execution failed");
-		const message = err instanceof Error ? err.message : String(err);
-		printError(message);
-		trackError("ask", "query_execution_failed");
-		await shutdownTelemetry();
-		process.exit(1);
-	}
-
-	const sanitizedQueryResult = sanitizeSensitiveData(queryResult);
-	const sanitizedProcessedSql = sanitizeSensitiveData(
-		safetyReport.processedSql,
-	);
-
-	printResults(sanitizedQueryResult);
-
-	// ── Generate summary ──────────────────────────────────────────────────────────
-	let summaryResult: SummaryResult | undefined;
-	const summarySpinner = ora("Generating summary...").start();
-
-	try {
-		summaryResult = await provider.generateSummary(
-			question,
-			sanitizedProcessedSql,
-			sanitizedQueryResult,
-			(chunk) => {
-				if (options.debug) {
-					process.stderr.write(chalk.dim(sanitizeSensitiveData(chunk)));
-				}
-			},
-		);
-		summarySpinner.succeed("Summary ready");
-	} catch {
-		summarySpinner.warn("Summary unavailable");
-	}
-
-	if (summaryResult) printSummary(summaryResult.summary);
-	if (sqlResult.explanation) printExplanation(sqlResult.explanation);
-
-	// ── Telemetry ─────────────────────────────────────────────────────────────────
-	const totalMs =
-		sqlResult.latencyMs +
-		queryResult.executionTimeMs +
-		(summaryResult?.latencyMs ?? 0);
-
-	trackQuery({
-		provider: config.provider,
-		model: config.model,
-		latencyMs: totalMs,
-	});
-
-	// ── Metrics ───────────────────────────────────────────────────────────────────
-	if (options.metrics || options.verbose || config.showMetrics) {
-		const metrics: QueryMetrics = {
-			tokensIn: (sqlResult.tokensIn ?? 0) + (summaryResult?.tokensIn ?? 0),
-			tokensOut: (sqlResult.tokensOut ?? 0) + (summaryResult?.tokensOut ?? 0),
-			totalLatencyMs: totalMs,
-			sqlGenerationMs: sqlResult.latencyMs,
-			executionMs: queryResult.executionTimeMs,
-			summaryMs: summaryResult?.latencyMs ?? 0,
+		trackQuery({
 			provider: config.provider,
 			model: config.model,
-		};
-		printMetrics(metrics);
+			latencyMs: response.latencyMs,
+		});
+
+		if (options.metrics || options.verbose || config.showMetrics) {
+			const metrics: QueryMetrics = {
+				tokensIn: response.tokensIn ?? 0,
+				tokensOut: response.tokensOut ?? 0,
+				totalLatencyMs: response.latencyMs,
+				sqlGenerationMs: 0,
+				executionMs: 0,
+				summaryMs: response.latencyMs,
+				provider: config.provider,
+				model: config.model,
+			};
+			printMetrics(metrics);
+		}
+
+		log("info", "Ask response completed", {
+			provider: config.provider,
+			model: config.model,
+			direct: response.direct,
+			latencyMs: response.latencyMs,
+		});
+	} catch (err: unknown) {
+		responseSpinner.fail("Assistant response failed");
+		const message = err instanceof Error ? err.message : String(err);
+		printError(message);
+		trackError("ask", "assistant_response_failed");
+		await shutdownTelemetry();
+		process.exit(1);
 	}
 
-	log("info", "Query completed", {
-		provider: config.provider,
-		model: config.model,
-		rows: queryResult.rowCount,
-		latencyMs: totalMs,
-	});
-
 	await shutdownTelemetry();
+}
+
+async function confirmAskToolExecution(
+	reasons: ApprovalReason[],
+	_sql: string,
+	config: ReturnType<typeof loadConfig>,
+	options: AskOptions,
+): Promise<boolean> {
+	const safeMode = options.safeMode ?? config.safeMode;
+	if (!safeMode || options.noConfirm) return true;
+
+	printApprovalWarning(reasons);
+	const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([
+		{
+			type: "confirm",
+			name: "confirmed",
+			message: "Execute this query?",
+			default: false,
+		},
+	]);
+
+	trackHumanApproval(confirmed);
+
+	if (!confirmed) {
+		console.log();
+		printInfo("Query cancelled.");
+	}
+
+	return confirmed;
 }

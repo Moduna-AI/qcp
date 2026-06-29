@@ -73,17 +73,20 @@ class Qcp < Formula
       Get started with qcp:
 
         qcp init
-        qcp connect postgres://user:pass@host/db
+        qcp auth
+        qcp connect
         qcp schema scan
         qcp ask "What are our top customers?"
 
-      Set your Gemini API key (default provider):
+      qcp auth walks you through provider setup, including Gemini, OpenAI,
+      Anthropic, or local Ollama. For non-interactive setup:
+
         qcp config set-key gemini YOUR_API_KEY
 
-      Or switch to a different provider:
-        qcp model set openai     # requires OPENAI_API_KEY
-        qcp model set anthropic  # requires ANTHROPIC_API_KEY
-        qcp model set ollama     # local, no API key needed
+      qcp connect walks you through database type selection and connection URL
+      entry. For scripts or CI:
+
+        qcp connect --type neon postgres://readonly_user:password@host/db
 
       Documentation: https://github.com/Moduna-AI/qcp
     EOS

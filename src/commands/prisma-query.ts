@@ -214,6 +214,8 @@ async function generateSql(
 			schema: input.schema,
 			config: input.config,
 			databaseUrl: input.databaseUrl,
+			prismaSchemaPath: input.config.prismaSchemaPath,
+			prismaDatasourceName: input.config.prismaDatasourceName,
 			debug: input.options?.debug,
 		});
 		spinner.succeed("SQL generated");

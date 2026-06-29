@@ -306,6 +306,8 @@ export async function doctorCommand(
 					(c) => c.name === "Connected" && c.status === "healthy",
 				),
 				type: config.databaseType,
+				prismaSchemaPath: config.prismaSchemaPath,
+				prismaDatasourceName: config.prismaDatasourceName,
 				readonly: true,
 				schemaScanned: existsSync(LOCAL_SCHEMA_PATH),
 			},

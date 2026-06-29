@@ -9,7 +9,11 @@ import { printError, printSection, printSuccess } from "@/output/index.js";
 import type { ProviderName } from "@/types/index.js";
 
 const SETTABLE_BOOLEANS = ["safeMode", "showSql", "showMetrics", "telemetry"];
-const SETTABLE_STRINGS = ["ollamaHost"];
+const SETTABLE_STRINGS = [
+	"ollamaHost",
+	"prismaSchemaPath",
+	"prismaDatasourceName",
+];
 
 export function configShowCommand(): void {
 	const config = loadConfig();
@@ -23,6 +27,12 @@ export function configShowCommand(): void {
 	console.log(`  Provider:     ${chalk.bold(config.provider)}`);
 	console.log(`  Model:        ${chalk.bold(config.model)}`);
 	console.log(`  Database:     ${chalk.bold(config.databaseType)}`);
+	if (config.prismaSchemaPath) {
+		console.log(`  Prisma file:  ${chalk.dim(config.prismaSchemaPath)}`);
+	}
+	if (config.prismaDatasourceName) {
+		console.log(`  Datasource:   ${chalk.dim(config.prismaDatasourceName)}`);
+	}
 	console.log();
 	console.log(`  Safe mode:    ${boolLabel(config.safeMode)}`);
 	console.log(`  Show SQL:     ${boolLabel(config.showSql)}`);

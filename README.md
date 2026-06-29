@@ -100,8 +100,8 @@ bun add -g qcp
 # 1. Set up your AI provider (Gemini is the default — free tier available)
 qcp auth
 
-# 2. Connect to your PostgreSQL database
-qcp connect postgres://readonly_user:password@localhost:5432/mydb
+# 2. Connect to your PostgreSQL database (guided database selector)
+qcp connect
 
 # 3. Index your schema (runs locally — no data leaves your machine)
 qcp schema scan
@@ -121,9 +121,9 @@ qcp chat
 
 | Command | Description |
 |---|---|
-| `qcp auth` | Interactive wizard to configure your AI provider |
+| `qcp auth` | Guided wizard to configure Gemini, OpenAI, Anthropic, or Ollama |
 | `qcp init` | Initialize qcp config and local project files |
-| `qcp connect <url>` | Connect to a PostgreSQL database |
+| `qcp connect` | Guided database setup and connection test |
 | `qcp schema scan` | Index the database schema locally |
 | `qcp ask "<question>"` | Query your database in plain English |
 | `qcp chat` | Start interactive multi-question session |
@@ -150,6 +150,14 @@ qcp config set safeMode true    # Require approval for sensitive queries
 qcp config set showSql false    # Hide generated SQL
 qcp config set showMetrics true # Always show token/timing metrics
 qcp config set-key gemini AIza... # Save API key
+```
+
+### Non-Interactive Setup
+
+```bash
+qcp config set-key gemini YOUR_API_KEY
+qcp connect --type neon postgres://readonly_user:password@host/db
+qcp connect --type prisma-postgres --schema prisma/schema.prisma --datasource db postgres://readonly_user:password@host/db
 ```
 
 ### Diagnostics

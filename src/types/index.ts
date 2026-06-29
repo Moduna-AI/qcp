@@ -20,6 +20,8 @@ export interface QcpConfig {
 	installId: string;
 	databaseType: DatabaseType;
 	databaseUrl?: string;
+	prismaSchemaPath?: string;
+	prismaDatasourceName?: string;
 	provider: ProviderName;
 	model: string;
 	telemetry: boolean;
