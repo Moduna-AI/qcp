@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { DatabaseSchema, QcpConfig } from "@/types/index.js";
-import { QcpSupervisorAgent, getDirectChatAnswer } from "./supervisor-agent.js";
+import { getDirectChatAnswer, QcpSupervisorAgent } from "./supervisor-agent.js";
 
 const schema: DatabaseSchema = {
 	scannedAt: "2026-06-29T00:00:00.000Z",

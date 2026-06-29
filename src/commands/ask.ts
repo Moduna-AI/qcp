@@ -251,7 +251,9 @@ export async function askCommand(
 	}
 
 	const sanitizedQueryResult = sanitizeSensitiveData(queryResult);
-	const sanitizedProcessedSql = sanitizeSensitiveData(safetyReport.processedSql);
+	const sanitizedProcessedSql = sanitizeSensitiveData(
+		safetyReport.processedSql,
+	);
 
 	printResults(sanitizedQueryResult);
 

@@ -18,7 +18,6 @@ import {
 import type {
 	DatabaseSchema,
 	QcpConfig,
-	QueryResult,
 	SecureQueryError,
 	SecureQueryResult,
 	SecurityRequestContext,
@@ -27,16 +26,14 @@ import type {
 import type { DatabaseAgentType } from "./database-agent.js";
 import {
 	createDatabaseTools,
-	executeSecureExplainQuery,
-	executeSecureReadQuery,
-	formatSchemaForDatabaseAgent,
 	type DatabaseExplainExecutor,
 	type DatabaseQueryExecutor,
+	formatSchemaForDatabaseAgent,
 } from "./database-tools.js";
 import { createMastraModelConfig } from "./model-config.js";
 import { PostgresAgent, type PostgresAgentConfig } from "./postgres-agent.js";
 
-const safetyReportSchema = z.object({
+const _safetyReportSchema = z.object({
 	safe: z.boolean(),
 	readOnly: z.boolean(),
 	allowedStatement: z.boolean(),
@@ -47,7 +44,7 @@ const safetyReportSchema = z.object({
 	statementType: z.string(),
 });
 
-const tenantIsolationReportSchema = z.object({
+const _tenantIsolationReportSchema = z.object({
 	safe: z.boolean(),
 	errors: z.array(z.string()),
 	warnings: z.array(z.string()),
@@ -56,12 +53,12 @@ const tenantIsolationReportSchema = z.object({
 	scopedTables: z.array(z.string()),
 });
 
-const approvalReasonSchema = z.object({
+const _approvalReasonSchema = z.object({
 	type: z.enum(["sensitive_table", "large_scan", "no_limit", "high_cost"]),
 	detail: z.string(),
 });
 
-const queryResultSchema = z.object({
+const _queryResultSchema = z.object({
 	rows: z.array(z.record(z.string(), z.unknown())),
 	rowCount: z.number(),
 	fields: z.array(z.string()),
@@ -375,7 +372,7 @@ interface ApprovalCheckOptions {
 	readonly requestContext?: unknown;
 }
 
-async function shouldRequirePrismaToolApproval(
+async function _shouldRequirePrismaToolApproval(
 	options: ApprovalCheckOptions,
 ): Promise<boolean> {
 	const safety = validateSql(options.sql);
@@ -465,7 +462,7 @@ interface ToolTransformPayload {
 	readonly output?: unknown;
 }
 
-function sanitizedToolModelOutput(output: unknown): {
+function _sanitizedToolModelOutput(output: unknown): {
 	readonly type: "json";
 	readonly value: unknown;
 } {
@@ -475,7 +472,7 @@ function sanitizedToolModelOutput(output: unknown): {
 	};
 }
 
-function secureToolTransform(): {
+function _secureToolTransform(): {
 	readonly display: {
 		readonly input: (payload: ToolTransformPayload) => Record<string, string>;
 		readonly output: (payload: ToolTransformPayload) => unknown;

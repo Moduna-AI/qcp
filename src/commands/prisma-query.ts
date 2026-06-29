@@ -269,7 +269,7 @@ async function executePrismaQuery(
 
 async function summarizePrismaResults(
 	input: HandlePrismaQuestionOptions,
-	sqlResult: SqlGenerationResult,
+	_sqlResult: SqlGenerationResult,
 	queryResult: QueryResult,
 	executedSql: string,
 ): Promise<SummaryResult | undefined> {

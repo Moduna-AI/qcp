@@ -25,9 +25,9 @@ import type {
 	ApprovalReason,
 	DatabaseSchema,
 	PromptViolationReport,
+	SafetyReport,
 	SchemaTable,
 	SecurityRequestContext,
-	SafetyReport,
 	TenantIsolationReport,
 } from "@/types/index.js";
 
@@ -332,7 +332,8 @@ function findNonReadOnlyStatement(stmt: Statement): string | null {
 	if (stmt.type === "select" || stmt.type === "values") return null;
 	if (stmt.type === "union" || stmt.type === "union all") {
 		return (
-			findNonReadOnlyStatement(stmt.left) ?? findNonReadOnlyStatement(stmt.right)
+			findNonReadOnlyStatement(stmt.left) ??
+			findNonReadOnlyStatement(stmt.right)
 		);
 	}
 	if (stmt.type === "with") {
@@ -617,7 +618,11 @@ function scopeFrom(
 	}
 
 	if (from.type === "statement") {
-		const scopedStatement = scopeSelectStatement(from.statement, state, cteNames);
+		const scopedStatement = scopeSelectStatement(
+			from.statement,
+			state,
+			cteNames,
+		);
 		return scopedStatement
 			? ({
 					...from,
@@ -654,9 +659,7 @@ function assertSafeJoin(from: From, state: TenantIsolationState): void {
 }
 
 function isCteReference(from: FromTable, cteNames: Set<string>): boolean {
-	return (
-		!from.name.schema && cteNames.has(from.name.name.toLowerCase())
-	);
+	return !from.name.schema && cteNames.has(from.name.name.toLowerCase());
 }
 
 function resolveTableScope(
@@ -666,7 +669,9 @@ function resolveTableScope(
 	const table = resolveSchemaTable(from.name, state);
 	if (!table) return null;
 
-	const columns = new Set(table.columns.map((column) => column.name.toLowerCase()));
+	const columns = new Set(
+		table.columns.map((column) => column.name.toLowerCase()),
+	);
 	const tenantColumn = TENANT_COLUMNS.find((column) => columns.has(column));
 	const userColumn = USER_COLUMNS.find((column) => columns.has(column));
 
@@ -706,7 +711,9 @@ function resolveSchemaTable(
 		return null;
 	}
 
-	state.errors.push(`Unknown table rejected by tenant isolation: ${name.name}.`);
+	state.errors.push(
+		`Unknown table rejected by tenant isolation: ${name.name}.`,
+	);
 	return null;
 }
 
@@ -896,9 +903,12 @@ function exprContainsSelect(expr: Expr): boolean {
 	}
 	if (expr.type === "cast") return exprContainsSelect(expr.operand);
 	if (expr.type === "case") {
-		return expr.whens.some(
-			(when) => exprContainsSelect(when.when) || exprContainsSelect(when.value),
-		) || (expr.else ? exprContainsSelect(expr.else) : false);
+		return (
+			expr.whens.some(
+				(when) =>
+					exprContainsSelect(when.when) || exprContainsSelect(when.value),
+			) || (expr.else ? exprContainsSelect(expr.else) : false)
+		);
 	}
 	if (expr.type === "call") return expr.args.some(exprContainsSelect);
 	if (expr.type === "list" || expr.type === "array") {
@@ -932,7 +942,9 @@ function tableKey(schema: string, name: string): string {
 }
 
 function formatTableId(table: SchemaTable): string {
-	return table.schema === "public" ? table.name : `${table.schema}.${table.name}`;
+	return table.schema === "public"
+		? table.name
+		: `${table.schema}.${table.name}`;
 }
 
 // ─── Privacy scrubbing and error hygiene ──────────────────────────────────────

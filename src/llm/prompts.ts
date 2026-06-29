@@ -1,7 +1,10 @@
-import { schemaToContext } from "@/schema/index.js";
 import { classifyPromptViolation } from "@/safety/index.js";
-import type { DatabaseSchema, QueryResult } from "@/types/index.js";
-import type { PromptViolationReport } from "@/types/index.js";
+import { schemaToContext } from "@/schema/index.js";
+import type {
+	DatabaseSchema,
+	PromptViolationReport,
+	QueryResult,
+} from "@/types/index.js";
 
 export class PromptViolationError extends Error {
 	readonly violation: PromptViolationReport;

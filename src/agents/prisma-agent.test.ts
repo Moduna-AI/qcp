@@ -78,9 +78,14 @@ describe("Prisma agent tools", () => {
 			},
 		});
 
-		const result = await executeTool(tools, "qcp_execute_read_sql", {
-			sql: "DELETE FROM users",
-		}, secureContext());
+		const result = await executeTool(
+			tools,
+			"qcp_execute_read_sql",
+			{
+				sql: "DELETE FROM users",
+			},
+			secureContext(),
+		);
 		const output = result as { ok: boolean; error?: string };
 
 		expect(output.ok).toBe(false);
@@ -99,9 +104,14 @@ describe("Prisma agent tools", () => {
 			},
 		});
 
-		const result = await executeTool(tools, "qcp_execute_read_sql", {
-			sql: "SELECT * FROM users",
-		}, secureContext());
+		const result = await executeTool(
+			tools,
+			"qcp_execute_read_sql",
+			{
+				sql: "SELECT * FROM users",
+			},
+			secureContext(),
+		);
 		const output = result as { ok: boolean; result?: QueryResult };
 
 		expect(output.ok).toBe(true);
@@ -153,9 +163,14 @@ describe("Prisma agent tools", () => {
 			}),
 		});
 
-		const result = await executeTool(tools, "qcp_execute_read_sql", {
-			sql: "SELECT * FROM users",
-		}, secureContext());
+		const result = await executeTool(
+			tools,
+			"qcp_execute_read_sql",
+			{
+				sql: "SELECT * FROM users",
+			},
+			secureContext(),
+		);
 		const output = result as { ok: boolean; result?: QueryResult };
 		const serialized = JSON.stringify(output);
 

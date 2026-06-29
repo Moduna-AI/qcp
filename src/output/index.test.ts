@@ -10,9 +10,7 @@ describe("terminal output privacy scrubbing", () => {
 
 	test("redacts sensitive literals in displayed SQL", () => {
 		const output = captureLogs(() => {
-			printSql(
-				"SELECT 'ada@example.com' as email, '123-45-6789' as ssn",
-			);
+			printSql("SELECT 'ada@example.com' as email, '123-45-6789' as ssn");
 		});
 
 		expect(output).not.toContain("ada@example.com");

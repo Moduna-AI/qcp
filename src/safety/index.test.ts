@@ -121,8 +121,7 @@ describe("SQL safety", () => {
 				"Bearer abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
 			nested: {
 				apiKey: "api_key=sk_test_1234567890abcdef",
-				jwt:
-					"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturepayload",
+				jwt: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturepayload",
 			},
 		});
 
