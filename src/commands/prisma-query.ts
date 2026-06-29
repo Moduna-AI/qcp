@@ -1,8 +1,11 @@
 import chalk from "chalk";
 import inquirer from "inquirer";
 import ora from "ora";
-import { generateSqlWithPrismaAgent } from "@/agents/prisma-agent.js";
-import { executeQuery, explainQuery } from "@/db/index.js";
+import {
+	executeSecurePrismaExplainQuery,
+	executeSecurePrismaReadQuery,
+	generateSqlWithPrismaAgent,
+} from "@/agents/prisma-agent.js";
 import { log } from "@/logger/index.js";
 import {
 	printApprovalWarning,
@@ -28,6 +31,7 @@ import type {
 	QcpConfig,
 	QueryMetrics,
 	QueryResult,
+	SecureQueryResult,
 	SqlGenerationResult,
 	SummaryResult,
 } from "@/types/index.js";
@@ -90,19 +94,23 @@ export async function handlePrismaQuestion(
 	const safeMode = options.safeMode ?? input.config.safeMode;
 
 	if (safeMode || options.debug) {
-		try {
-			const explain = await explainQuery(
-				input.databaseUrl,
-				safetyReport.processedSql,
-			);
+		const explain = await executeSecurePrismaExplainQuery(
+			{
+				databaseUrl: input.databaseUrl,
+				schema: input.schema,
+				sensitiveTablePatterns: input.config.sensitiveTablePatterns,
+			},
+			safetyReport.processedSql,
+		);
+		if (explain.ok) {
 			estimatedRows = explain.estimatedRows;
 			if (options.debug) {
 				console.log(chalk.dim("\n── EXPLAIN Plan ──"));
 				console.log(chalk.dim(explain.plan.slice(0, 1200)));
 				console.log();
 			}
-		} catch {
-			// EXPLAIN is advisory; execution remains gated by AST validation.
+		} else if (options.debug) {
+			console.log(chalk.dim(`EXPLAIN unavailable: ${explain.error}`));
 		}
 	}
 
@@ -144,19 +152,20 @@ export async function handlePrismaQuestion(
 	);
 	if (!queryResult) return false;
 
-	printResults(queryResult);
+	printResults(queryResult.result);
 
 	const summaryResult = await summarizePrismaResults(
 		input,
 		sqlResult,
-		queryResult,
+		queryResult.result,
+		queryResult.isolation.processedSql,
 	);
 	if (summaryResult) printSummary(summaryResult.summary);
 	if (sqlResult.explanation) printExplanation(sqlResult.explanation);
 
 	const totalMs =
 		sqlResult.latencyMs +
-		queryResult.executionTimeMs +
+		queryResult.result.executionTimeMs +
 		(summaryResult?.latencyMs ?? 0);
 
 	trackQuery({
@@ -171,7 +180,7 @@ export async function handlePrismaQuestion(
 			tokensOut: (sqlResult.tokensOut ?? 0) + (summaryResult?.tokensOut ?? 0),
 			totalLatencyMs: totalMs,
 			sqlGenerationMs: sqlResult.latencyMs,
-			executionMs: queryResult.executionTimeMs,
+			executionMs: queryResult.result.executionTimeMs,
 			summaryMs: summaryResult?.latencyMs ?? 0,
 			provider: input.config.provider,
 			model: input.config.model,
@@ -182,7 +191,7 @@ export async function handlePrismaQuestion(
 	log("info", "Prisma query completed", {
 		provider: input.config.provider,
 		model: input.config.model,
-		rows: queryResult.rowCount,
+		rows: queryResult.result.rowCount,
 		latencyMs: totalMs,
 	});
 
@@ -215,35 +224,43 @@ async function generateSql(
 async function executePrismaQuery(
 	input: HandlePrismaQuestionOptions,
 	sql: string,
-): Promise<QueryResult | undefined> {
+): Promise<SecureQueryResult | undefined> {
 	const spinner = ora(
 		input.commandName === "chat" ? "Executing..." : "Executing query...",
 	).start();
-	try {
-		const queryResult = await executeQuery(input.databaseUrl, sql);
-		spinner.succeed(
-			input.commandName === "chat"
-				? `${queryResult.rowCount} row(s) · ${queryResult.executionTimeMs}ms`
-				: `Query executed · ${queryResult.rowCount} row(s) · ${queryResult.executionTimeMs}ms`,
-		);
-		return queryResult;
-	} catch (err: unknown) {
+	const queryResult = await executeSecurePrismaReadQuery(
+		{
+			databaseUrl: input.databaseUrl,
+			schema: input.schema,
+			sensitiveTablePatterns: input.config.sensitiveTablePatterns,
+		},
+		sql,
+	);
+
+	if (!queryResult.ok) {
 		spinner.fail(
 			input.commandName === "chat"
 				? "Execution failed"
 				: "Query execution failed",
 		);
-		const message = err instanceof Error ? err.message : String(err);
-		printError(message);
+		printError(queryResult.error);
 		trackError(input.commandName, "prisma_query_execution_failed");
 		return undefined;
 	}
+
+	spinner.succeed(
+		input.commandName === "chat"
+			? `${queryResult.result.rowCount} row(s) · ${queryResult.result.executionTimeMs}ms`
+			: `Query executed · ${queryResult.result.rowCount} row(s) · ${queryResult.result.executionTimeMs}ms`,
+	);
+	return queryResult;
 }
 
 async function summarizePrismaResults(
 	input: HandlePrismaQuestionOptions,
 	sqlResult: SqlGenerationResult,
 	queryResult: QueryResult,
+	executedSql: string,
 ): Promise<SummaryResult | undefined> {
 	const spinner = ora(
 		input.commandName === "chat" ? "Summarizing..." : "Generating summary...",
@@ -251,7 +268,7 @@ async function summarizePrismaResults(
 	try {
 		const summaryResult = await input.provider.generateSummary(
 			input.question,
-			sqlResult.sql,
+			executedSql,
 			queryResult,
 			(chunk) => {
 				if (input.options?.debug) process.stderr.write(chalk.dim(chunk));

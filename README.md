@@ -32,6 +32,7 @@ Safety:
   ✓ SELECT-only query
   ✓ LIMIT applied
   ✓ Query validated
+  ✓ Privacy checks active
 
 Results:
   ┌──────────────────────┬───────────────┐
@@ -53,12 +54,12 @@ Insight:
 
 ## Why qcp?
 
-Most data questions never get answered because they require SQL knowledge or data team availability. qcp bridges that gap — letting any developer or analyst query their PostgreSQL database using plain English, with full transparency into the generated SQL and a safety model that makes it impossible to accidentally modify data.
+Most data questions never get answered because they require SQL knowledge or data team availability. qcp bridges that gap — letting any developer or analyst query their PostgreSQL database using plain English, with full transparency into the generated SQL and deterministic guardrails around database access.
 
 **Three principles:**
-1. **Safety** — Read-only enforcement at the AST level. No string matching. Impossible to run INSERT, UPDATE, DELETE, or any write operation.
-2. **Trust** — Every generated SQL query is shown before execution. You always know what ran against your database.
-3. **Privacy** — No row data, schema metadata, SQL queries, or credentials are ever sent to telemetry. Your data stays yours.
+1. **Safety** — Read-only enforcement at the AST level plus read-only database transactions. `INSERT`, `UPDATE`, `DELETE`, DDL, and privilege changes are rejected before execution.
+2. **Trust** — Every generated SQL query is shown before execution. You always know what qcp intends to run against your database.
+3. **Privacy** — Telemetry never includes SQL, schema metadata, row data, connection URLs, or credentials. Database tool outputs are scrubbed before they are returned to an agent context.
 
 ---
 
@@ -168,6 +169,8 @@ qcp ask "question" --debug      # Show raw LLM output and EXPLAIN plan
 qcp ask "question" --yes        # Skip approval prompts
 ```
 
+Use `--yes` only in trusted local workflows. It skips human approval prompts, but it does not disable SQL validation, read-only transactions, tenant isolation, or result scrubbing.
+
 ---
 
 ## Supported Providers
@@ -181,13 +184,13 @@ qcp ask "question" --yes        # Skip approval prompts
 
 ---
 
-## Safety Model
+## Safety and Security Model
 
-qcp enforces read-only access at **two independent layers**:
+qcp treats LLM output as untrusted. The model can suggest SQL, but deterministic code decides whether that SQL is allowed to run.
 
-### 1. SQL Safety (AST-based)
+### 1. SQL Safety (AST-Based)
 
-Every generated SQL is parsed into an Abstract Syntax Tree and validated before execution. This is **not string matching** — it's a structural parse of the SQL.
+Every generated SQL statement is parsed into an Abstract Syntax Tree and validated before execution. The allowlist is structural, not prompt-based.
 
 **Allowed:** `SELECT`, `WITH` (CTEs), `EXPLAIN`
 
@@ -205,11 +208,47 @@ Safety:
 ✗ Query rejected — does not meet safety requirements.
 ```
 
+`WITH` queries are also inspected internally, so a data-changing CTE such as `WITH deleted AS (DELETE ...) SELECT ...` is rejected.
+
 ### 2. Transaction-level enforcement
 
-All queries run inside a `BEGIN READ ONLY` transaction. Even if the safety parser were somehow bypassed, the database itself would reject any write operation.
+All database reads run inside a `BEGIN READ ONLY` transaction. Even if application-level validation were bypassed, PostgreSQL should reject write operations inside the transaction.
 
-### 3. Human-in-the-loop approval
+### 3. Mastra Tool Containment
+
+The Prisma/Mastra database tools route execution through one security pipeline:
+
+1. Validate read-only SQL.
+2. Require trusted Mastra `requestContext.tenantId` and `requestContext.userId`.
+3. Inject tenant/user predicates into supported `SELECT`/`WITH` queries.
+4. Execute only the rewritten SQL.
+5. Scrub sensitive output before it reaches the LLM/tool transcript.
+6. Return sanitized errors without raw stack traces or schema dumps.
+
+Direct `qcp ask` execution does not invent a tenant boundary. If the Prisma tool path has no trusted Mastra request context, query execution fails closed instead of relying on the LLM to add tenant filters.
+
+### 4. Tenant Isolation
+
+For Mastra database tool execution, qcp deterministically scopes queries using schema metadata:
+
+- `tenantId` maps to `organization_id`, `tenant_id`, `org_id`, `workspace_id`, or `account_id`.
+- `userId` maps to `user_id` or `owner_id`.
+- Tables without a supported scope column are rejected.
+- Unknown tables, ambiguous unqualified tables, unsafe outer joins, table functions, lateral queries, and unsupported nested-query shapes are rejected.
+
+Tenant predicates are injected by AST rewriting and serialization, not by string concatenation and not by LLM instructions.
+
+### 5. Privacy Scrubbing
+
+Database tool outputs are recursively scrubbed before they are returned to an agent/model-facing context. qcp masks common sensitive values including:
+
+- Email addresses
+- Phone numbers
+- SSNs
+- Bearer tokens and JWT-like tokens
+- API keys, secrets, passwords, and long secret-like strings
+
+### 6. Human-in-the-loop approval
 
 When `safeMode` is enabled (default), qcp prompts for confirmation before executing queries that:
 - Access potentially sensitive tables (`users`, `customers`, `payments`, etc.)
@@ -224,9 +263,22 @@ When `safeMode` is enabled (default), qcp prompts for confirmation before execut
 ? Execute this query? (y/N)
 ```
 
+Mastra execution tools also use tool-level approval hooks for sensitive or high-cost reads.
+
+### 7. Error Hygiene
+
+Raw database errors are not returned to the agent as-is. qcp suppresses driver stack traces, raw SQL, and schema-revealing database messages in model-facing tool responses.
+
+For more detail, see [SECURITY.md](SECURITY.md).
+
 ---
 
 ## Privacy Model
+
+qcp has two different data flows:
+
+1. **LLM provider flow** — To generate SQL and summaries, qcp sends your question and local schema context to your configured provider unless you use a local provider such as Ollama. Query results may be sent to the configured provider for summarization.
+2. **Telemetry flow** — Anonymous product telemetry is separate and intentionally excludes database content.
 
 ### What qcp sends to telemetry (PostHog)
 
@@ -250,7 +302,11 @@ qcp telemetry off
 
 ### Schema scanning
 
-`qcp schema scan` reads **structure only** — table names, column names, types, and relationships. It never reads row data. The schema is stored locally in `.qcp/schema.json` and never sent to any external service.
+`qcp schema scan` reads **structure only** — table names, column names, types, and relationships. It never reads row data. The schema is stored locally in `.qcp/schema.json`. When you ask questions with a hosted LLM provider, qcp may send relevant schema context to that configured provider so it can generate SQL.
+
+### Logs and support bundles
+
+qcp logging and support tooling are designed to avoid credentials, SQL text, schema content, and row data. If you share logs or support bundles publicly, review them first as you would with any developer diagnostic artifact.
 
 ---
 
