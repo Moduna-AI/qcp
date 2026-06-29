@@ -4,7 +4,6 @@ import type { ToolsetsInput, ToolsInput } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { MCPClient } from "@mastra/mcp";
 import { z } from "zod";
-import { getApiKey } from "@/config/index.js";
 import { executeQuery, explainQuery } from "@/db/index.js";
 import { extractSqlAndExplanation } from "@/llm/prompts.js";
 import {
@@ -18,7 +17,6 @@ import {
 } from "@/safety/index.js";
 import type {
 	DatabaseSchema,
-	ProviderName,
 	QcpConfig,
 	QueryResult,
 	SecureQueryError,
@@ -27,6 +25,15 @@ import type {
 	SqlGenerationResult,
 } from "@/types/index.js";
 import type { DatabaseAgentType } from "./database-agent.js";
+import {
+	createDatabaseTools,
+	executeSecureExplainQuery,
+	executeSecureReadQuery,
+	formatSchemaForDatabaseAgent,
+	type DatabaseExplainExecutor,
+	type DatabaseQueryExecutor,
+} from "./database-tools.js";
+import { createMastraModelConfig } from "./model-config.js";
 import { PostgresAgent, type PostgresAgentConfig } from "./postgres-agent.js";
 
 const safetyReportSchema = z.object({
@@ -70,15 +77,9 @@ const prismaContextSchema = z.object({
 	prismaSchema: z.string().optional(),
 });
 
-export type PrismaQueryExecutor = (
-	databaseUrl: string,
-	sql: string,
-) => Promise<QueryResult>;
+export type PrismaQueryExecutor = DatabaseQueryExecutor;
 
-export type PrismaExplainExecutor = (
-	databaseUrl: string,
-	sql: string,
-) => Promise<{ plan: string; estimatedRows: number }>;
+export type PrismaExplainExecutor = DatabaseExplainExecutor;
 
 export interface PrismaAgentConfig<TAgentId extends string = string>
 	extends PostgresAgentConfig<TAgentId> {
@@ -153,144 +154,15 @@ export interface CreatePrismaToolsOptions {
 export function createPrismaTools(
 	options: CreatePrismaToolsOptions,
 ): ToolsInput {
-	const queryExecutor = options.queryExecutor ?? executeQuery;
-	const explainExecutor = options.explainExecutor ?? explainQuery;
-	const sensitiveTablePatterns = [...(options.sensitiveTablePatterns ?? [])];
-
 	return {
-		qcp_validate_sql: createTool({
-			id: "qcp_validate_sql",
-			description:
-				"Validate PostgreSQL SQL with qcp's AST safety policy. Only SELECT, WITH, and safe EXPLAIN statements are accepted.",
-			inputSchema: z.object({
-				sql: z.string().min(1),
-			}),
-			outputSchema: safetyReportSchema,
-			mcp: {
-				annotations: {
-					title: "Validate SQL",
-					readOnlyHint: true,
-					destructiveHint: false,
-					idempotentHint: true,
-					openWorldHint: false,
-				},
-			},
-			execute: async ({ sql }) => validateSql(sql),
-		}),
-		qcp_execute_read_sql: createTool({
-			id: "qcp_execute_read_sql",
-			description:
-				"Execute a SQL query only after qcp AST validation succeeds. Rejected SQL is returned as a structured safety error.",
-			strict: true,
-			inputSchema: z.object({
-				sql: z.string().min(1),
-			}),
-			requestContextSchema: securityRequestContextSchema,
-			outputSchema: z.discriminatedUnion("ok", [
-				z.object({
-					ok: z.literal(true),
-					safety: safetyReportSchema,
-					isolation: tenantIsolationReportSchema,
-					result: queryResultSchema,
-					approvalReasons: z.array(approvalReasonSchema),
-				}),
-				z.object({
-					ok: z.literal(false),
-					safety: safetyReportSchema,
-					isolation: tenantIsolationReportSchema.optional(),
-					error: z.string(),
-					approvalReasons: z.array(approvalReasonSchema),
-				}),
-			]),
-			requireApproval: async ({ sql }, context) =>
-				shouldRequirePrismaToolApproval({
-					sql,
-					databaseUrl: options.databaseUrl,
-					schema: options.schema,
-					sensitiveTablePatterns,
-					explainExecutor,
-					requestContext: context?.requestContext,
-				}),
-			toModelOutput: sanitizedToolModelOutput,
-			transform: secureToolTransform(),
-			mcp: {
-				annotations: {
-					title: "Execute Read SQL",
-					readOnlyHint: true,
-					destructiveHint: false,
-					idempotentHint: false,
-					openWorldHint: false,
-				},
-			},
-			execute: async ({ sql }, context) =>
-				executeSecurePrismaReadQuery(
-					{
-						databaseUrl: options.databaseUrl,
-						schema: options.schema,
-						queryExecutor,
-						sensitiveTablePatterns,
-					},
-					sql,
-					context,
-				),
-		}),
-		qcp_explain_read_sql: createTool({
-			id: "qcp_explain_read_sql",
-			description:
-				"Run EXPLAIN for a SQL query only after qcp AST validation succeeds.",
-			strict: true,
-			inputSchema: z.object({
-				sql: z.string().min(1),
-			}),
-			requestContextSchema: securityRequestContextSchema,
-			outputSchema: z.discriminatedUnion("ok", [
-				z.object({
-					ok: z.literal(true),
-					safety: safetyReportSchema,
-					isolation: tenantIsolationReportSchema,
-					plan: z.string(),
-					estimatedRows: z.number(),
-					approvalReasons: z.array(approvalReasonSchema),
-				}),
-				z.object({
-					ok: z.literal(false),
-					safety: safetyReportSchema,
-					isolation: tenantIsolationReportSchema.optional(),
-					error: z.string(),
-					approvalReasons: z.array(approvalReasonSchema),
-				}),
-			]),
-			requireApproval: async ({ sql }, context) =>
-				shouldRequirePrismaToolApproval({
-					sql,
-					databaseUrl: options.databaseUrl,
-					schema: options.schema,
-					sensitiveTablePatterns,
-					explainExecutor,
-					requestContext: context?.requestContext,
-				}),
-			toModelOutput: sanitizedToolModelOutput,
-			transform: secureToolTransform(),
-			mcp: {
-				annotations: {
-					title: "Explain Read SQL",
-					readOnlyHint: true,
-					destructiveHint: false,
-					idempotentHint: true,
-					openWorldHint: false,
-				},
-			},
-			execute: async ({ sql }, context) =>
-				executeSecurePrismaExplainQuery(
-					{
-						databaseUrl: options.databaseUrl,
-						schema: options.schema,
-						explainExecutor,
-						sensitiveTablePatterns,
-					},
-					sql,
-					context,
-				),
+		...createDatabaseTools({
+			databaseUrl: options.databaseUrl,
+			schema: options.schema,
+			prismaSchemaPath: options.prismaSchemaPath,
+			sensitiveTablePatterns: options.sensitiveTablePatterns,
+			queryExecutor: options.queryExecutor,
+			explainExecutor: options.explainExecutor,
+			enforceTenantIsolation: true,
 		}),
 		qcp_read_prisma_context: createTool({
 			id: "qcp_read_prisma_context",
@@ -316,7 +188,7 @@ export function createPrismaTools(
 				return {
 					databaseName: options.schema.databaseName,
 					tableCount: options.schema.tableCount,
-					schemaContext: formatSchemaForPrismaAgent(options.schema),
+					schemaContext: formatSchemaForDatabaseAgent(options.schema),
 					prismaSchemaPath: options.prismaSchemaPath,
 					prismaSchema,
 				};
@@ -479,8 +351,7 @@ function prepareSecurePrismaQuery(
 			safety,
 			isolation,
 			error:
-				isolation.errors[0] ??
-				"Query rejected by qcp tenant isolation policy.",
+				isolation.errors[0] ?? "Query rejected by qcp tenant isolation policy.",
 			approvalReasons: [],
 		};
 	}
@@ -489,11 +360,9 @@ function prepareSecurePrismaQuery(
 		ok: true,
 		safety,
 		isolation,
-		approvalReasons: getApprovalReasons(
-			isolation.processedSql,
-			safety,
-			[...sensitiveTablePatterns],
-		),
+		approvalReasons: getApprovalReasons(isolation.processedSql, safety, [
+			...sensitiveTablePatterns,
+		]),
 	};
 }
 
@@ -525,11 +394,9 @@ async function shouldRequirePrismaToolApproval(
 	if (!isolation.safe) return false;
 
 	if (
-		requiresSensitiveApproval(
-			isolation.processedSql,
-			safety,
-			[...options.sensitiveTablePatterns],
-		)
+		requiresSensitiveApproval(isolation.processedSql, safety, [
+			...options.sensitiveTablePatterns,
+		])
 	) {
 		return true;
 	}
@@ -555,7 +422,9 @@ interface RequestContextLike {
 	get(key: string): unknown;
 }
 
-function extractSecurityRequestContext(context?: unknown): SecurityRequestContext | null {
+function extractSecurityRequestContext(
+	context?: unknown,
+): SecurityRequestContext | null {
 	const requestContext = getRecordValue(context, "requestContext") ?? context;
 	const candidates: unknown[] = [];
 
@@ -632,7 +501,9 @@ function secureToolTransform(): {
 	};
 }
 
-function redactedToolInput(_payload: ToolTransformPayload): Record<string, string> {
+function redactedToolInput(
+	_payload: ToolTransformPayload,
+): Record<string, string> {
 	return { sql: "[REDACTED_SQL]" };
 }
 
@@ -775,51 +646,6 @@ ${options.question}
 
 Generate a safe, read-only PostgreSQL query for this Prisma Postgres database.
 `.trim();
-}
-
-function createMastraModelConfig(
-	config: QcpConfig,
-): PrismaAgentConfig["model"] {
-	const apiKey = getApiKey(config);
-	applyProviderEnv(config.provider, apiKey);
-
-	switch (config.provider) {
-		case "gemini":
-			return `google/${config.model}` as PrismaAgentConfig["model"];
-		case "openai":
-			return `openai/${config.model}` as PrismaAgentConfig["model"];
-		case "anthropic":
-			return `anthropic/${config.model}` as PrismaAgentConfig["model"];
-		case "ollama":
-			if (config.ollamaHost) {
-				process.env.OLLAMA_BASE_URL = config.ollamaHost;
-			}
-			return `ollama/${config.model}` as PrismaAgentConfig["model"];
-		default: {
-			const _exhaustive: never = config.provider;
-			return _exhaustive;
-		}
-	}
-}
-
-function applyProviderEnv(
-	provider: ProviderName,
-	apiKey: string | undefined,
-): void {
-	if (!apiKey || provider === "ollama") return;
-
-	if (provider === "gemini") {
-		process.env.GOOGLE_GENERATIVE_AI_API_KEY = apiKey;
-		process.env.GOOGLE_API_KEY = apiKey;
-		return;
-	}
-
-	if (provider === "openai") {
-		process.env.OPENAI_API_KEY = apiKey;
-		return;
-	}
-
-	process.env.ANTHROPIC_API_KEY = apiKey;
 }
 
 function formatSchemaForPrismaAgent(schema: DatabaseSchema): string {
