@@ -20,7 +20,11 @@ import {
 	printSql,
 	printSummary,
 } from "@/output/index.js";
-import { getApprovalReasons, validateSql } from "@/safety/index.js";
+import {
+	getApprovalReasons,
+	sanitizeSensitiveData,
+	validateSql,
+} from "@/safety/index.js";
 import {
 	trackError,
 	trackHumanApproval,
@@ -275,10 +279,12 @@ async function summarizePrismaResults(
 	try {
 		const summaryResult = await input.provider.generateSummary(
 			input.question,
-			executedSql,
+			sanitizeSensitiveData(executedSql),
 			queryResult,
 			(chunk) => {
-				if (input.options?.debug) process.stderr.write(chalk.dim(chunk));
+				if (input.options?.debug) {
+					process.stderr.write(chalk.dim(sanitizeSensitiveData(chunk)));
+				}
 			},
 		);
 		spinner.succeed(input.commandName === "chat" ? "Done" : "Summary ready");

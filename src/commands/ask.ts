@@ -22,6 +22,7 @@ import {
 import {
 	classifyPromptViolation,
 	getApprovalReasons,
+	sanitizeSensitiveData,
 	validateSql,
 } from "@/safety/index.js";
 import { loadSchema, schemaToContext } from "@/schema/index.js";
@@ -249,7 +250,10 @@ export async function askCommand(
 		process.exit(1);
 	}
 
-	printResults(queryResult);
+	const sanitizedQueryResult = sanitizeSensitiveData(queryResult);
+	const sanitizedProcessedSql = sanitizeSensitiveData(safetyReport.processedSql);
+
+	printResults(sanitizedQueryResult);
 
 	// ── Generate summary ──────────────────────────────────────────────────────────
 	let summaryResult: SummaryResult | undefined;
@@ -258,10 +262,12 @@ export async function askCommand(
 	try {
 		summaryResult = await provider.generateSummary(
 			question,
-			safetyReport.processedSql,
-			queryResult,
+			sanitizedProcessedSql,
+			sanitizedQueryResult,
 			(chunk) => {
-				if (options.debug) process.stderr.write(chalk.dim(chunk));
+				if (options.debug) {
+					process.stderr.write(chalk.dim(sanitizeSensitiveData(chunk)));
+				}
 			},
 		);
 		summarySpinner.succeed("Summary ready");

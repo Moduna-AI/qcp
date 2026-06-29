@@ -31,6 +31,7 @@ import {
 import {
 	classifyPromptViolation,
 	getApprovalReasons,
+	sanitizeSensitiveData,
 	validateSql,
 } from "@/safety/index.js";
 import { loadSchema } from "@/schema/index.js";
@@ -313,15 +314,18 @@ async function _handleQuestion(
 		return;
 	}
 
-	printResults(queryResult);
+	const sanitizedQueryResult = sanitizeSensitiveData(queryResult);
+	const sanitizedProcessedSql = sanitizeSensitiveData(safetyReport.processedSql);
+
+	printResults(sanitizedQueryResult);
 
 	// Summary
 	const summarySpinner = ora("Summarizing...").start();
 	try {
 		const summaryResult = await session.provider.generateSummary(
 			question,
-			safetyReport.processedSql,
-			queryResult,
+			sanitizedProcessedSql,
+			sanitizedQueryResult,
 		);
 		summarySpinner.succeed("Done");
 		printSummary(summaryResult.summary);
