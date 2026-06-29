@@ -4,6 +4,7 @@ import ora from "ora";
 import { ensureConfigDir, getDatabaseUrl, loadConfig } from "@/config/index.js";
 import { executeQuery, explainQuery } from "@/db/index.js";
 import { createProvider } from "@/llm/index.js";
+import { isPromptViolationError } from "@/llm/prompts.js";
 import { log } from "@/logger/index.js";
 import {
 	printApprovalWarning,
@@ -11,13 +12,18 @@ import {
 	printExplanation,
 	printInfo,
 	printMetrics,
+	printPromptViolation,
 	printQuestion,
 	printResults,
 	printSafetyReport,
 	printSql,
 	printSummary,
 } from "@/output/index.js";
-import { getApprovalReasons, validateSql } from "@/safety/index.js";
+import {
+	classifyPromptViolation,
+	getApprovalReasons,
+	validateSql,
+} from "@/safety/index.js";
 import { loadSchema, schemaToContext } from "@/schema/index.js";
 import {
 	initTelemetry,
@@ -97,6 +103,14 @@ export async function askCommand(
 
 	printQuestion(question);
 
+	const promptViolation = classifyPromptViolation(question);
+	if (promptViolation) {
+		printPromptViolation(promptViolation);
+		trackQueryRejected(`${promptViolation.category}_prompt_violation`);
+		await shutdownTelemetry();
+		process.exit(1);
+	}
+
 	if (shouldUsePrismaAgent(config)) {
 		const completed = await handlePrismaQuestion({
 			question,
@@ -123,6 +137,12 @@ export async function askCommand(
 		sqlSpinner.succeed("SQL generated");
 	} catch (err: unknown) {
 		sqlSpinner.fail("SQL generation failed");
+		if (isPromptViolationError(err)) {
+			printPromptViolation(err.violation);
+			trackQueryRejected(`${err.violation.category}_prompt_violation`);
+			await shutdownTelemetry();
+			process.exit(1);
+		}
 		const message = err instanceof Error ? err.message : String(err);
 		printError(message);
 		trackError("ask", "sql_generation_failed");

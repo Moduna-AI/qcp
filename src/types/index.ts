@@ -160,6 +160,15 @@ export interface SecureQueryError {
 	approvalReasons: ApprovalReason[];
 }
 
+export type PromptViolationCategory = "privacy" | "security" | "safety";
+
+export interface PromptViolationReport {
+	category: PromptViolationCategory;
+	title: string;
+	message: string;
+	detail: string;
+}
+
 export interface QueryMetrics {
 	tokensIn: number;
 	tokensOut: number;

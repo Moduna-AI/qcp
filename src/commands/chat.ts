@@ -13,6 +13,7 @@ import ora from "ora";
 import { getDatabaseUrl, loadConfig } from "@/config/index.js";
 import { executeQuery } from "@/db/index.js";
 import { createProvider } from "@/llm/index.js";
+import { isPromptViolationError } from "@/llm/prompts.js";
 import { log } from "@/logger/index.js";
 import {
 	printApprovalWarning,
@@ -20,13 +21,18 @@ import {
 	printError,
 	printExplanation,
 	printInfo,
+	printPromptViolation,
 	printResults,
 	printSafetyReport,
 	printSection,
 	printSql,
 	printSummary,
 } from "@/output/index.js";
-import { getApprovalReasons, validateSql } from "@/safety/index.js";
+import {
+	classifyPromptViolation,
+	getApprovalReasons,
+	validateSql,
+} from "@/safety/index.js";
 import { loadSchema } from "@/schema/index.js";
 import {
 	initTelemetry,
@@ -211,6 +217,13 @@ async function _handleQuestion(
 	databaseUrl: string,
 	options: ChatOptions,
 ): Promise<void> {
+	const promptViolation = classifyPromptViolation(question);
+	if (promptViolation) {
+		printPromptViolation(promptViolation);
+		trackQueryRejected(`${promptViolation.category}_prompt_violation`);
+		return;
+	}
+
 	if (shouldUsePrismaAgent(config)) {
 		await handlePrismaQuestion({
 			question,
@@ -233,6 +246,11 @@ async function _handleQuestion(
 		sqlSpinner.succeed("SQL generated");
 	} catch (err: unknown) {
 		sqlSpinner.fail("SQL generation failed");
+		if (isPromptViolationError(err)) {
+			printPromptViolation(err.violation);
+			trackQueryRejected(`${err.violation.category}_prompt_violation`);
+			return;
+		}
 		const msg = err instanceof Error ? err.message : String(err);
 		printError(msg);
 		trackError("chat", "sql_generation_failed");

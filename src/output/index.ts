@@ -2,6 +2,7 @@ import chalk from "chalk";
 import Table from "cli-table3";
 import type {
 	ApprovalReason,
+	PromptViolationReport,
 	QueryMetrics,
 	QueryResult,
 	SafetyReport,
@@ -134,6 +135,14 @@ export function printApprovalWarning(reasons: ApprovalReason[]): void {
 	for (const reason of reasons) {
 		console.log(chalk.yellow(`   • ${reason.detail}`));
 	}
+}
+
+export function printPromptViolation(violation: PromptViolationReport): void {
+	const label = violation.category.toUpperCase();
+	console.error(chalk.red(`\n  ✗ ${violation.title}: `) + chalk.white(label));
+	console.error(chalk.white(`    ${violation.message}`));
+	console.error(chalk.dim(`    ${violation.detail}`));
+	console.error(chalk.dim("    No SQL was generated or executed."));
 }
 
 // ─── Metrics ──────────────────────────────────────────────────────────────────

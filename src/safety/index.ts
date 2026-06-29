@@ -24,6 +24,7 @@ import { z } from "zod";
 import type {
 	ApprovalReason,
 	DatabaseSchema,
+	PromptViolationReport,
 	SchemaTable,
 	SecurityRequestContext,
 	SafetyReport,
@@ -75,6 +76,64 @@ export const securityRequestContextSchema = z.object({
 	tenantId: z.string().min(1),
 	userId: z.string().min(1),
 });
+
+const SECURITY_PROMPT_PATTERNS = [
+	/\b(ignore|override|bypass|disable)\b.{0,80}\b(safety|security|policy|guardrail|approval|validation|tenant|rls)\b/i,
+	/\b(jailbreak|prompt injection|system prompt|developer message)\b/i,
+	/\b(escalate|grant|revoke)\b.{0,80}\b(privilege|permission|role|admin|superuser|access)\b/i,
+	/\b(steal|exfiltrate|leak)\b.{0,80}\b(credentials?|passwords?|tokens?|secrets?|keys?)\b/i,
+] as const;
+
+const SAFETY_PROMPT_PATTERNS = [
+	/\b(drop|delete|truncate|alter|update|insert|create|replace|merge|copy)\b/i,
+	/\b(remove|erase|destroy|wipe|purge)\b.{0,80}\b(table|tables|row|rows|record|records|data|database|schema)\b/i,
+	/\b(change|modify|set)\b.{0,80}\b(row|rows|record|records|email|password|role|status|database|table|schema)\b/i,
+] as const;
+
+const PRIVACY_PROMPT_PATTERNS = [
+	/\b(show|list|dump|export|reveal|get|fetch)\b.{0,100}\b(emails?|phone numbers?|ssn|social security|api keys?|tokens?|secrets?|passwords?|credentials?)\b/i,
+	/\b(pii|personal data|private data|sensitive data)\b/i,
+	/\b(all users?|customers?|employees?)\b.{0,100}\b(emails?|phone numbers?|addresses?|ssn|tokens?|secrets?|passwords?)\b/i,
+] as const;
+
+export function classifyPromptViolation(
+	prompt: string,
+): PromptViolationReport | null {
+	const normalized = prompt.trim();
+	if (!normalized) return null;
+
+	if (SECURITY_PROMPT_PATTERNS.some((pattern) => pattern.test(normalized))) {
+		return {
+			category: "security",
+			title: "Security violation",
+			message: "Request rejected — security policy violation.",
+			detail:
+				"qcp cannot help bypass safety controls, escalate privileges, expose credentials, or weaken tenant boundaries.",
+		};
+	}
+
+	if (SAFETY_PROMPT_PATTERNS.some((pattern) => pattern.test(normalized))) {
+		return {
+			category: "safety",
+			title: "Safety violation",
+			message: "Request rejected — safety policy violation.",
+			detail:
+				"qcp is read-only and cannot generate or execute SQL that modifies data, changes schema, or performs destructive database operations.",
+		};
+	}
+
+	if (PRIVACY_PROMPT_PATTERNS.some((pattern) => pattern.test(normalized))) {
+		return {
+			category: "privacy",
+			title: "Privacy violation",
+			message: "Request rejected — privacy policy violation.",
+			detail:
+				"qcp cannot directly expose personal data, credentials, tokens, secrets, or other sensitive fields. Ask for aggregate or non-sensitive results instead.",
+		};
+	}
+
+	return null;
+}
 
 // ─── EXPLAIN detection ────────────────────────────────────────────────────────
 // pgsql-ast-parser v12 does not parse EXPLAIN.
