@@ -7,12 +7,23 @@ import { z } from "zod";
 import { getApiKey } from "@/config/index.js";
 import { executeQuery, explainQuery } from "@/db/index.js";
 import { extractSqlAndExplanation } from "@/llm/prompts.js";
-import { validateSql } from "@/safety/index.js";
+import {
+	enforceTenantIsolation,
+	getApprovalReasons,
+	requiresSensitiveApproval,
+	sanitizeDatabaseError,
+	sanitizeSensitiveData,
+	securityRequestContextSchema,
+	validateSql,
+} from "@/safety/index.js";
 import type {
 	DatabaseSchema,
 	ProviderName,
 	QcpConfig,
 	QueryResult,
+	SecureQueryError,
+	SecureQueryResult,
+	SecurityRequestContext,
 	SqlGenerationResult,
 } from "@/types/index.js";
 import type { DatabaseAgentType } from "./database-agent.js";
@@ -27,6 +38,20 @@ const safetyReportSchema = z.object({
 	warnings: z.array(z.string()),
 	processedSql: z.string(),
 	statementType: z.string(),
+});
+
+const tenantIsolationReportSchema = z.object({
+	safe: z.boolean(),
+	errors: z.array(z.string()),
+	warnings: z.array(z.string()),
+	processedSql: z.string(),
+	injectedPredicates: z.array(z.string()),
+	scopedTables: z.array(z.string()),
+});
+
+const approvalReasonSchema = z.object({
+	type: z.enum(["sensitive_table", "large_scan", "no_limit", "high_cost"]),
+	detail: z.string(),
 });
 
 const queryResultSchema = z.object({
@@ -61,6 +86,7 @@ export interface PrismaAgentConfig<TAgentId extends string = string>
 	readonly schema?: DatabaseSchema;
 	readonly prismaSchemaPath?: string;
 	readonly datasourceName?: string;
+	readonly sensitiveTablePatterns?: readonly string[];
 	readonly queryExecutor?: PrismaQueryExecutor;
 	readonly explainExecutor?: PrismaExplainExecutor;
 }
@@ -80,6 +106,7 @@ export class PrismaAgent<
 							databaseUrl: config.databaseUrl,
 							schema: config.schema,
 							prismaSchemaPath: config.prismaSchemaPath,
+							sensitiveTablePatterns: config.sensitiveTablePatterns,
 							queryExecutor: config.queryExecutor,
 							explainExecutor: config.explainExecutor,
 						})
@@ -118,6 +145,7 @@ export interface CreatePrismaToolsOptions {
 	readonly databaseUrl: string;
 	readonly schema: DatabaseSchema;
 	readonly prismaSchemaPath?: string;
+	readonly sensitiveTablePatterns?: readonly string[];
 	readonly queryExecutor?: PrismaQueryExecutor;
 	readonly explainExecutor?: PrismaExplainExecutor;
 }
@@ -127,6 +155,7 @@ export function createPrismaTools(
 ): ToolsInput {
 	const queryExecutor = options.queryExecutor ?? executeQuery;
 	const explainExecutor = options.explainExecutor ?? explainQuery;
+	const sensitiveTablePatterns = [...(options.sensitiveTablePatterns ?? [])];
 
 	return {
 		qcp_validate_sql: createTool({
@@ -152,21 +181,38 @@ export function createPrismaTools(
 			id: "qcp_execute_read_sql",
 			description:
 				"Execute a SQL query only after qcp AST validation succeeds. Rejected SQL is returned as a structured safety error.",
+			strict: true,
 			inputSchema: z.object({
 				sql: z.string().min(1),
 			}),
+			requestContextSchema: securityRequestContextSchema,
 			outputSchema: z.discriminatedUnion("ok", [
 				z.object({
 					ok: z.literal(true),
 					safety: safetyReportSchema,
+					isolation: tenantIsolationReportSchema,
 					result: queryResultSchema,
+					approvalReasons: z.array(approvalReasonSchema),
 				}),
 				z.object({
 					ok: z.literal(false),
 					safety: safetyReportSchema,
+					isolation: tenantIsolationReportSchema.optional(),
 					error: z.string(),
+					approvalReasons: z.array(approvalReasonSchema),
 				}),
 			]),
+			requireApproval: async ({ sql }, context) =>
+				shouldRequirePrismaToolApproval({
+					sql,
+					databaseUrl: options.databaseUrl,
+					schema: options.schema,
+					sensitiveTablePatterns,
+					explainExecutor,
+					requestContext: context?.requestContext,
+				}),
+			toModelOutput: sanitizedToolModelOutput,
+			transform: secureToolTransform(),
 			mcp: {
 				annotations: {
 					title: "Execute Read SQL",
@@ -176,43 +222,55 @@ export function createPrismaTools(
 					openWorldHint: false,
 				},
 			},
-			execute: async ({ sql }) => {
-				const safety = validateSql(sql);
-				if (!safety.safe) {
-					return {
-						ok: false as const,
-						safety,
-						error: safety.errors[0] ?? "SQL rejected by qcp safety policy.",
-					};
-				}
-
-				const result = await queryExecutor(
-					options.databaseUrl,
-					safety.processedSql,
-				);
-				return { ok: true as const, safety, result };
-			},
+			execute: async ({ sql }, context) =>
+				executeSecurePrismaReadQuery(
+					{
+						databaseUrl: options.databaseUrl,
+						schema: options.schema,
+						queryExecutor,
+						sensitiveTablePatterns,
+					},
+					sql,
+					context,
+				),
 		}),
 		qcp_explain_read_sql: createTool({
 			id: "qcp_explain_read_sql",
 			description:
 				"Run EXPLAIN for a SQL query only after qcp AST validation succeeds.",
+			strict: true,
 			inputSchema: z.object({
 				sql: z.string().min(1),
 			}),
+			requestContextSchema: securityRequestContextSchema,
 			outputSchema: z.discriminatedUnion("ok", [
 				z.object({
 					ok: z.literal(true),
 					safety: safetyReportSchema,
+					isolation: tenantIsolationReportSchema,
 					plan: z.string(),
 					estimatedRows: z.number(),
+					approvalReasons: z.array(approvalReasonSchema),
 				}),
 				z.object({
 					ok: z.literal(false),
 					safety: safetyReportSchema,
+					isolation: tenantIsolationReportSchema.optional(),
 					error: z.string(),
+					approvalReasons: z.array(approvalReasonSchema),
 				}),
 			]),
+			requireApproval: async ({ sql }, context) =>
+				shouldRequirePrismaToolApproval({
+					sql,
+					databaseUrl: options.databaseUrl,
+					schema: options.schema,
+					sensitiveTablePatterns,
+					explainExecutor,
+					requestContext: context?.requestContext,
+				}),
+			toModelOutput: sanitizedToolModelOutput,
+			transform: secureToolTransform(),
 			mcp: {
 				annotations: {
 					title: "Explain Read SQL",
@@ -222,27 +280,17 @@ export function createPrismaTools(
 					openWorldHint: false,
 				},
 			},
-			execute: async ({ sql }) => {
-				const safety = validateSql(sql);
-				if (!safety.safe) {
-					return {
-						ok: false as const,
-						safety,
-						error: safety.errors[0] ?? "SQL rejected by qcp safety policy.",
-					};
-				}
-
-				const explain = await explainExecutor(
-					options.databaseUrl,
-					safety.processedSql,
-				);
-				return {
-					ok: true as const,
-					safety,
-					plan: explain.plan,
-					estimatedRows: explain.estimatedRows,
-				};
-			},
+			execute: async ({ sql }, context) =>
+				executeSecurePrismaExplainQuery(
+					{
+						databaseUrl: options.databaseUrl,
+						schema: options.schema,
+						explainExecutor,
+						sensitiveTablePatterns,
+					},
+					sql,
+					context,
+				),
 		}),
 		qcp_read_prisma_context: createTool({
 			id: "qcp_read_prisma_context",
@@ -275,6 +323,321 @@ export function createPrismaTools(
 			},
 		}),
 	};
+}
+
+export interface SecurePrismaReadOptions {
+	readonly databaseUrl: string;
+	readonly schema: DatabaseSchema;
+	readonly queryExecutor?: PrismaQueryExecutor;
+	readonly sensitiveTablePatterns?: readonly string[];
+}
+
+export interface SecurePrismaExplainOptions {
+	readonly databaseUrl: string;
+	readonly schema: DatabaseSchema;
+	readonly explainExecutor?: PrismaExplainExecutor;
+	readonly sensitiveTablePatterns?: readonly string[];
+}
+
+type SecurePrismaReadOutput = SecureQueryResult | SecureQueryError;
+
+type SecurePrismaExplainOutput =
+	| {
+			readonly ok: true;
+			readonly safety: ReturnType<typeof validateSql>;
+			readonly isolation: ReturnType<typeof enforceTenantIsolation>;
+			readonly plan: string;
+			readonly estimatedRows: number;
+			readonly approvalReasons: ReturnType<typeof getApprovalReasons>;
+	  }
+	| SecureQueryError;
+
+interface SecureBaseSuccess {
+	readonly ok: true;
+	readonly safety: ReturnType<typeof validateSql>;
+	readonly isolation: ReturnType<typeof enforceTenantIsolation>;
+	readonly approvalReasons: ReturnType<typeof getApprovalReasons>;
+}
+
+type SecureBaseResult = SecureBaseSuccess | SecureQueryError;
+
+export async function executeSecurePrismaReadQuery(
+	options: SecurePrismaReadOptions,
+	sql: string,
+	context?: unknown,
+): Promise<SecurePrismaReadOutput> {
+	const base = prepareSecurePrismaQuery(
+		sql,
+		options.schema,
+		options.sensitiveTablePatterns ?? [],
+		context,
+	);
+	if (!base.ok) return base;
+
+	const queryExecutor = options.queryExecutor ?? executeQuery;
+	try {
+		const result = await queryExecutor(
+			options.databaseUrl,
+			base.isolation.processedSql,
+		);
+		return {
+			ok: true,
+			safety: base.safety,
+			isolation: base.isolation,
+			result: sanitizeSensitiveData(result),
+			approvalReasons: base.approvalReasons,
+		};
+	} catch (err: unknown) {
+		return {
+			ok: false,
+			safety: base.safety,
+			isolation: base.isolation,
+			error: sanitizeDatabaseError(err),
+			approvalReasons: base.approvalReasons,
+		};
+	}
+}
+
+export async function executeSecurePrismaExplainQuery(
+	options: SecurePrismaExplainOptions,
+	sql: string,
+	context?: unknown,
+): Promise<SecurePrismaExplainOutput> {
+	const base = prepareSecurePrismaQuery(
+		sql,
+		options.schema,
+		options.sensitiveTablePatterns ?? [],
+		context,
+	);
+	if (!base.ok) return base;
+
+	const explainExecutor = options.explainExecutor ?? explainQuery;
+	try {
+		const explain = await explainExecutor(
+			options.databaseUrl,
+			base.isolation.processedSql,
+		);
+		const approvalReasons = getApprovalReasons(
+			base.isolation.processedSql,
+			base.safety,
+			[...(options.sensitiveTablePatterns ?? [])],
+			explain.estimatedRows,
+		);
+		return {
+			ok: true,
+			safety: base.safety,
+			isolation: base.isolation,
+			plan: sanitizeSensitiveData(explain.plan),
+			estimatedRows: explain.estimatedRows,
+			approvalReasons,
+		};
+	} catch (err: unknown) {
+		return {
+			ok: false,
+			safety: base.safety,
+			isolation: base.isolation,
+			error: sanitizeDatabaseError(err),
+			approvalReasons: base.approvalReasons,
+		};
+	}
+}
+
+function prepareSecurePrismaQuery(
+	sql: string,
+	schema: DatabaseSchema,
+	sensitiveTablePatterns: readonly string[],
+	context?: unknown,
+): SecureBaseResult {
+	const safety = validateSql(sql);
+	if (!safety.safe) {
+		return {
+			ok: false,
+			safety,
+			error: safety.errors[0] ?? "SQL rejected by qcp safety policy.",
+			approvalReasons: [],
+		};
+	}
+
+	const securityContext = extractSecurityRequestContext(context);
+	if (!securityContext) {
+		return {
+			ok: false,
+			safety,
+			error: "Trusted tenant context is required.",
+			approvalReasons: [],
+		};
+	}
+
+	const isolation = enforceTenantIsolation(
+		safety.processedSql,
+		schema,
+		securityContext,
+	);
+	if (!isolation.safe) {
+		return {
+			ok: false,
+			safety,
+			isolation,
+			error:
+				isolation.errors[0] ??
+				"Query rejected by qcp tenant isolation policy.",
+			approvalReasons: [],
+		};
+	}
+
+	return {
+		ok: true,
+		safety,
+		isolation,
+		approvalReasons: getApprovalReasons(
+			isolation.processedSql,
+			safety,
+			[...sensitiveTablePatterns],
+		),
+	};
+}
+
+interface ApprovalCheckOptions {
+	readonly sql: string;
+	readonly databaseUrl: string;
+	readonly schema: DatabaseSchema;
+	readonly sensitiveTablePatterns: readonly string[];
+	readonly explainExecutor: PrismaExplainExecutor;
+	readonly requestContext?: unknown;
+}
+
+async function shouldRequirePrismaToolApproval(
+	options: ApprovalCheckOptions,
+): Promise<boolean> {
+	const safety = validateSql(options.sql);
+	if (!safety.safe) return false;
+
+	const securityContext = extractSecurityRequestContext({
+		requestContext: options.requestContext,
+	});
+	if (!securityContext) return false;
+
+	const isolation = enforceTenantIsolation(
+		safety.processedSql,
+		options.schema,
+		securityContext,
+	);
+	if (!isolation.safe) return false;
+
+	if (
+		requiresSensitiveApproval(
+			isolation.processedSql,
+			safety,
+			[...options.sensitiveTablePatterns],
+		)
+	) {
+		return true;
+	}
+
+	try {
+		const explain = await options.explainExecutor(
+			options.databaseUrl,
+			isolation.processedSql,
+		);
+		const reasons = getApprovalReasons(
+			isolation.processedSql,
+			safety,
+			[...options.sensitiveTablePatterns],
+			explain.estimatedRows,
+		);
+		return reasons.some((reason) => reason.type === "high_cost");
+	} catch {
+		return true;
+	}
+}
+
+interface RequestContextLike {
+	get(key: string): unknown;
+}
+
+function extractSecurityRequestContext(context?: unknown): SecurityRequestContext | null {
+	const requestContext = getRecordValue(context, "requestContext") ?? context;
+	const candidates: unknown[] = [];
+
+	if (isRequestContextLike(requestContext)) {
+		candidates.push({
+			tenantId: requestContext.get("tenantId"),
+			userId: requestContext.get("userId"),
+		});
+	}
+
+	const all = getRecordValue(requestContext, "all");
+	if (all) candidates.push(all);
+	candidates.push(requestContext);
+
+	for (const candidate of candidates) {
+		const result = securityRequestContextSchema.safeParse(candidate);
+		if (result.success) return result.data;
+	}
+
+	return null;
+}
+
+function isRequestContextLike(value: unknown): value is RequestContextLike {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		typeof (value as { get?: unknown }).get === "function"
+	);
+}
+
+function getRecordValue(value: unknown, key: string): unknown {
+	if (typeof value !== "object" || value === null) return undefined;
+	return (value as Record<string, unknown>)[key];
+}
+
+interface ToolTransformPayload {
+	readonly input?: unknown;
+	readonly output?: unknown;
+}
+
+function sanitizedToolModelOutput(output: unknown): {
+	readonly type: "json";
+	readonly value: unknown;
+} {
+	return {
+		type: "json",
+		value: sanitizeSensitiveData(output),
+	};
+}
+
+function secureToolTransform(): {
+	readonly display: {
+		readonly input: (payload: ToolTransformPayload) => Record<string, string>;
+		readonly output: (payload: ToolTransformPayload) => unknown;
+		readonly error: () => Record<string, string>;
+	};
+	readonly transcript: {
+		readonly input: (payload: ToolTransformPayload) => Record<string, string>;
+		readonly output: (payload: ToolTransformPayload) => unknown;
+		readonly error: () => Record<string, string>;
+	};
+} {
+	return {
+		display: {
+			input: redactedToolInput,
+			output: ({ output }) => sanitizeSensitiveData(output),
+			error: sanitizedToolError,
+		},
+		transcript: {
+			input: redactedToolInput,
+			output: ({ output }) => sanitizeSensitiveData(output),
+			error: sanitizedToolError,
+		},
+	};
+}
+
+function redactedToolInput(_payload: ToolTransformPayload): Record<string, string> {
+	return { sql: "[REDACTED_SQL]" };
+}
+
+function sanitizedToolError(): Record<string, string> {
+	return { message: sanitizeDatabaseError(undefined) };
 }
 
 export interface PrismaMcpToolsetsResult {
@@ -366,6 +729,7 @@ export async function generateSqlWithPrismaAgent(
 		databaseUrl: options.databaseUrl,
 		schema: options.schema,
 		prismaSchemaPath: options.prismaSchemaPath,
+		sensitiveTablePatterns: options.config.sensitiveTablePatterns,
 		instructions: [
 			"Use qcp_read_prisma_context and qcp_validate_sql to improve SQL quality.",
 			"Do not call qcp_execute_read_sql while generating SQL for qcp CLI output.",
