@@ -43,6 +43,7 @@ import type {
 	QueryResult,
 	SqlGenerationResult,
 } from "@/types/index.js";
+import { handlePrismaQuestion, shouldUsePrismaAgent } from "./prisma-query.js";
 
 const HELP_COMMANDS = new Set(["/help", "?", "help"]);
 const EXIT_COMMANDS = new Set([
@@ -77,7 +78,7 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 
 	const databaseUrl = getDatabaseUrl(config);
 	if (!databaseUrl) {
-		printError("No database connection configured.", "Run: qcp connect <url>");
+		printError("No database connection configured.", "Run: qcp connect");
 		await shutdownTelemetry();
 		process.exit(1);
 	}
@@ -210,6 +211,19 @@ async function _handleQuestion(
 	databaseUrl: string,
 	options: ChatOptions,
 ): Promise<void> {
+	if (shouldUsePrismaAgent(config)) {
+		await handlePrismaQuestion({
+			question,
+			schema: session.schema,
+			config,
+			databaseUrl,
+			provider: session.provider,
+			commandName: "chat",
+			options,
+		});
+		return;
+	}
+
 	// Generate SQL
 	const sqlSpinner = ora("Generating SQL...").start();
 	let sqlResult: SqlGenerationResult;

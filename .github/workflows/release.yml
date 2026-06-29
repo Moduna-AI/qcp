@@ -101,42 +101,54 @@ jobs:
       - name: Compute Checksums and Update Remote Tap Formula
         shell: bash
         run: |
-          # 1. Compute the checksums locally inside the dist folder
+          # 1. Detect the branch the tag was created from
+          git fetch --all
+          BRANCH=$(git branch -r --contains "$GITHUB_SHA" \
+            | grep -v HEAD \
+            | sed 's|.*origin/||' \
+            | xargs \
+            | awk '{print $1}')
+
+          if [ -z "$BRANCH" ]; then
+            echo "Error: Could not determine source branch for $GITHUB_REF"
+            exit 1
+          fi
+          echo "Resolved source branch: $BRANCH"
+
+          # 2. Compute checksums
           cd dist
           sha256sum qcp-* > checksums.txt
           cat checksums.txt
-          
+
           SHA_MAC_ARM64=$(sha256sum qcp-macos-arm64 | awk '{print $1}')
           SHA_LINUX_X64=$(sha256sum qcp-linux-x64 | awk '{print $1}')
           SHA_LINUX_ARM64=$(sha256sum qcp-linux-arm64 | awk '{print $1}')
-          cd .. # Move back to workspace root
+          cd ..
 
-          # 2. Prepare the tap-repo directory and resolve detached HEAD
+          # 3. Prepare tap-repo, checkout the detected branch
           cd tap-repo
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Fix the detached HEAD by tracking the remote main branch
-          git fetch origin main
-          git checkout main
-          cd .. # Back to root to run sed safely
 
-          # 3. Define path to the checked-out tap formula
+          git fetch origin "$BRANCH"
+          git checkout "$BRANCH"
+          cd ..
+
+          # 4. Update the formula
           FORMULA_PATH="tap-repo/Formula/qcp.rb"
-          
+
           if [ -f "$FORMULA_PATH" ]; then
-            # 4. Smart Regex Replacement (Note: Mac runners might need sed -i '', but assuming Linux runner)
             sed -i "/qcp-macos-arm64/{n;s/sha256 \".*\"/sha256 \"${SHA_MAC_ARM64}\"/}" $FORMULA_PATH
             sed -i "/qcp-linux-x64/{n;s/sha256 \".*\"/sha256 \"${SHA_LINUX_X64}\"/}" $FORMULA_PATH
             sed -i "/qcp-linux-arm64/{n;s/sha256 \".*\"/sha256 \"${SHA_LINUX_ARM64}\"/}" $FORMULA_PATH
-            
-            # 5. Commit and push modifications safely
+
+            # 5. Commit and push to the same branch
             cd tap-repo
             git add Formula/qcp.rb
-            
+
             if ! git diff --cached --quiet; then
               git commit -m "chore: update qcp formula checksums for ${GITHUB_REF#refs/tags/}"
-              git push origin main
+              git push origin "$BRANCH"
             else
               echo "Formula checksums are already identical. Skipping commit."
             fi

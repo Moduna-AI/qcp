@@ -2,6 +2,13 @@
 
 export type ProviderName = "gemini" | "openai" | "anthropic" | "ollama";
 
+export type DatabaseType =
+	| "prisma-postgres"
+	| "neon"
+	| "supabase"
+	| "oracle-postgres"
+	| "other-postgres";
+
 export interface ApiKeys {
 	gemini?: string;
 	openai?: string;
@@ -11,6 +18,7 @@ export interface ApiKeys {
 export interface QcpConfig {
 	version: string;
 	installId: string;
+	databaseType: DatabaseType;
 	databaseUrl?: string;
 	provider: ProviderName;
 	model: string;

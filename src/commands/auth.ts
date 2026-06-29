@@ -241,10 +241,7 @@ function _modelChoices(provider: ProviderName) {
 function _printNextSteps(): void {
 	console.log();
 	console.log(chalk.bold("  Next steps:"));
-	console.log(
-		chalk.dim("  1. ") +
-			chalk.white("qcp connect postgres://user:pass@host/db"),
-	);
+	console.log(chalk.dim("  1. ") + chalk.white("qcp connect"));
 	console.log(chalk.dim("  2. ") + chalk.white("qcp schema scan"));
 	console.log(
 		chalk.dim("  3. ") + chalk.white('qcp ask "What were our top customers?"'),
