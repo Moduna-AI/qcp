@@ -26,7 +26,7 @@ export function connect(databaseUrl: string): ReturnType<typeof postgres> {
 
 export function getConnection(): ReturnType<typeof postgres> {
 	if (!_sql) {
-		throw new Error("Not connected to database. Run: qcp connect <url>");
+		throw new Error("Not connected to database. Run: qcp connect");
 	}
 	return _sql;
 }

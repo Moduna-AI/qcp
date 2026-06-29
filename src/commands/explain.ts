@@ -3,17 +3,19 @@ import ora from "ora";
 import { getDatabaseUrl, loadConfig } from "@/config/index.js";
 import { explainQuery } from "@/db/index.js";
 import { createProvider } from "@/llm/index.js";
+import { isPromptViolationError } from "@/llm/prompts.js";
 import { log } from "@/logger/index.js";
 import {
 	printError,
 	printExplanation,
 	printInfo,
+	printPromptViolation,
 	printQuestion,
 	printSafetyReport,
 	printSection,
 	printSql,
 } from "@/output/index.js";
-import { validateSql } from "@/safety/index.js";
+import { classifyPromptViolation, validateSql } from "@/safety/index.js";
 import { loadSchema } from "@/schema/index.js";
 import {
 	initTelemetry,
@@ -36,7 +38,7 @@ export async function explainCommand(
 
 	const databaseUrl = getDatabaseUrl(config);
 	if (!databaseUrl) {
-		printError("No database connection configured.", "Run: qcp connect <url>");
+		printError("No database connection configured.", "Run: qcp connect");
 		await shutdownTelemetry();
 		process.exit(1);
 	}
@@ -69,6 +71,13 @@ export async function explainCommand(
 
 	printQuestion(question);
 
+	const promptViolation = classifyPromptViolation(question);
+	if (promptViolation) {
+		printPromptViolation(promptViolation);
+		await shutdownTelemetry();
+		process.exit(1);
+	}
+
 	// ── Generate SQL ─────────────────────────────────────────────────────────────
 	const sqlSpinner = ora("Generating SQL...").start();
 
@@ -78,6 +87,11 @@ export async function explainCommand(
 		sqlSpinner.succeed("SQL generated");
 	} catch (err: unknown) {
 		sqlSpinner.fail("SQL generation failed");
+		if (isPromptViolationError(err)) {
+			printPromptViolation(err.violation);
+			await shutdownTelemetry();
+			process.exit(1);
+		}
 		const message = err instanceof Error ? err.message : String(err);
 		printError(message);
 		await shutdownTelemetry();

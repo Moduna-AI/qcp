@@ -10,23 +10,21 @@ import * as readline from "node:readline/promises";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import ora from "ora";
+import { QcpSupervisorAgent } from "@/agents/index.js";
 import { getDatabaseUrl, loadConfig } from "@/config/index.js";
-import { executeQuery } from "@/db/index.js";
-import { createProvider } from "@/llm/index.js";
 import { log } from "@/logger/index.js";
 import {
 	printApprovalWarning,
 	printBanner,
 	printError,
-	printExplanation,
 	printInfo,
-	printResults,
-	printSafetyReport,
+	printPromptViolation,
 	printSection,
-	printSql,
-	printSummary,
 } from "@/output/index.js";
-import { getApprovalReasons, validateSql } from "@/safety/index.js";
+import {
+	classifyPromptViolation,
+	sanitizeSensitiveData,
+} from "@/safety/index.js";
 import { loadSchema } from "@/schema/index.js";
 import {
 	initTelemetry,
@@ -37,12 +35,7 @@ import {
 	trackQuery,
 	trackQueryRejected,
 } from "@/telemetry/index.js";
-import type {
-	DatabaseSchema,
-	LLMProvider,
-	QueryResult,
-	SqlGenerationResult,
-} from "@/types/index.js";
+import type { ApprovalReason, DatabaseSchema } from "@/types/index.js";
 
 const HELP_COMMANDS = new Set(["/help", "?", "help"]);
 const EXIT_COMMANDS = new Set([
@@ -59,7 +52,7 @@ const SCHEMA_COMMANDS = new Set(["/schema", "/tables", "tables"]);
 
 interface ChatSession {
 	schema: DatabaseSchema;
-	provider: LLMProvider;
+	supervisor: QcpSupervisorAgent;
 	questionCount: number;
 	startTime: number;
 }
@@ -77,7 +70,7 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 
 	const databaseUrl = getDatabaseUrl(config);
 	if (!databaseUrl) {
-		printError("No database connection configured.", "Run: qcp connect <url>");
+		printError("No database connection configured.", "Run: qcp connect");
 		await shutdownTelemetry();
 		process.exit(1);
 	}
@@ -94,16 +87,6 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 		);
 	} catch (_: unknown) {
 		schemaSpinner.fail("Schema not found. Run: qcp schema scan");
-		await shutdownTelemetry();
-		process.exit(1);
-	}
-
-	let provider: LLMProvider;
-	try {
-		provider = createProvider(config);
-	} catch (err: unknown) {
-		const msg = err instanceof Error ? err.message : String(err);
-		printError(msg);
 		await shutdownTelemetry();
 		process.exit(1);
 	}
@@ -128,9 +111,17 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 	);
 	console.log();
 
+	const supervisor = new QcpSupervisorAgent({
+		config,
+		databaseUrl,
+		schema,
+		approvalHandler: async (reasons, sql) =>
+			confirmChatToolExecution(reasons, sql, config, options),
+	});
+
 	const session: ChatSession = {
 		schema,
-		provider,
+		supervisor,
 		questionCount: 0,
 		startTime: Date.now(),
 	};
@@ -194,7 +185,7 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 		// ── Process question ───────────────────────────────────────────────────
 		session.questionCount++;
 		console.log();
-		await _handleQuestion(trimmed, session, config, databaseUrl, options);
+		await _handleQuestion(trimmed, session, config);
 	}
 
 	rl.close();
@@ -207,111 +198,67 @@ async function _handleQuestion(
 	question: string,
 	session: ChatSession,
 	config: ReturnType<typeof loadConfig>,
-	databaseUrl: string,
-	options: ChatOptions,
 ): Promise<void> {
-	// Generate SQL
-	const sqlSpinner = ora("Generating SQL...").start();
-	let sqlResult: SqlGenerationResult;
+	const promptViolation = classifyPromptViolation(question);
+	if (promptViolation) {
+		printPromptViolation(promptViolation);
+		trackQueryRejected(`${promptViolation.category}_prompt_violation`);
+		return;
+	}
 
+	const spinner = ora("Thinking...").start();
 	try {
-		sqlResult = await session.provider.generateSql(question, session.schema);
-		sqlSpinner.succeed("SQL generated");
+		const response = await session.supervisor.generateResponse(question);
+		spinner.succeed(response.direct ? "Ready" : "Done");
+		printChatAnswer(response.text);
+
+		trackQuery({
+			provider: config.provider,
+			model: config.model,
+			latencyMs: response.latencyMs,
+		});
+
+		log("info", "Chat response completed", {
+			direct: response.direct,
+			question: question.slice(0, 60),
+		});
 	} catch (err: unknown) {
-		sqlSpinner.fail("SQL generation failed");
+		spinner.fail("Assistant response failed");
 		const msg = err instanceof Error ? err.message : String(err);
 		printError(msg);
-		trackError("chat", "sql_generation_failed");
-		return;
+		trackError("chat", "assistant_response_failed");
 	}
-
-	// Show SQL
-	if (config.showSql) printSql(sqlResult.sql);
-
-	// Safety validation
-	const safetyReport = validateSql(sqlResult.sql);
-	printSafetyReport(safetyReport);
-
-	if (!safetyReport.safe) {
-		printError("Query rejected — safety validation failed.");
-		trackQueryRejected("safety_validation_failed");
-		return;
-	}
-
-	// Human-in-the-loop approval
-	if (config.safeMode && !options.noConfirm) {
-		const reasons = getApprovalReasons(
-			safetyReport.processedSql,
-			safetyReport,
-			config.sensitiveTablePatterns,
-		);
-
-		if (reasons.length > 0) {
-			printApprovalWarning(reasons);
-			const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([
-				{
-					type: "confirm",
-					name: "confirmed",
-					message: "Execute this query?",
-					default: false,
-				},
-			]);
-			trackHumanApproval(confirmed);
-			if (!confirmed) {
-				printInfo("Skipped. Ask another question.");
-				return;
-			}
-		}
-	}
-
-	// Execute
-	const execSpinner = ora("Executing...").start();
-	let queryResult: QueryResult;
-
-	try {
-		queryResult = await executeQuery(databaseUrl, safetyReport.processedSql);
-		execSpinner.succeed(
-			`${queryResult.rowCount} row(s) · ${queryResult.executionTimeMs}ms`,
-		);
-	} catch (err: unknown) {
-		execSpinner.fail("Execution failed");
-		const msg = err instanceof Error ? err.message : String(err);
-		printError(msg);
-		trackError("chat", "query_execution_failed");
-		return;
-	}
-
-	printResults(queryResult);
-
-	// Summary
-	const summarySpinner = ora("Summarizing...").start();
-	try {
-		const summaryResult = await session.provider.generateSummary(
-			question,
-			safetyReport.processedSql,
-			queryResult,
-		);
-		summarySpinner.succeed("Done");
-		printSummary(summaryResult.summary);
-	} catch {
-		summarySpinner.stop();
-	}
-
-	if (sqlResult.explanation) printExplanation(sqlResult.explanation);
-
-	trackQuery({
-		provider: config.provider,
-		model: config.model,
-		latencyMs: sqlResult.latencyMs + queryResult.executionTimeMs,
-	});
-
-	log("info", "Chat query completed", {
-		rows: queryResult.rowCount,
-		question: question.slice(0, 60),
-	});
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
+
+async function confirmChatToolExecution(
+	reasons: ApprovalReason[],
+	_sql: string,
+	config: ReturnType<typeof loadConfig>,
+	options: ChatOptions,
+): Promise<boolean> {
+	if (!config.safeMode || options.noConfirm) return true;
+
+	printApprovalWarning(reasons);
+	const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([
+		{
+			type: "confirm",
+			name: "confirmed",
+			message: "Execute this query?",
+			default: false,
+		},
+	]);
+	trackHumanApproval(confirmed);
+	return confirmed;
+}
+
+function printChatAnswer(answer: string): void {
+	const sanitized = sanitizeSensitiveData(answer.trim());
+	if (!sanitized) return;
+	console.log(chalk.bold("\nAssistant:"));
+	console.log(chalk.white(`  ${sanitized.replace(/\n/g, "\n  ")}`));
+}
 
 function _printHelp(): void {
 	console.log();
