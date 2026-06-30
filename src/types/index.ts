@@ -9,6 +9,26 @@ export type DatabaseType =
 	| "oracle-postgres"
 	| "other-postgres";
 
+export interface DatabaseConnectionConfig {
+	id: string;
+	name: string;
+	databaseType: DatabaseType;
+	databaseUrl: string;
+	prismaSchemaPath?: string;
+	prismaDatasourceName?: string;
+	createdAt: string;
+	updatedAt: string;
+}
+
+export interface ActiveDatabaseConnection {
+	id: string;
+	name: string;
+	databaseType: DatabaseType;
+	databaseUrl: string;
+	prismaSchemaPath?: string;
+	prismaDatasourceName?: string;
+}
+
 export interface ApiKeys {
 	gemini?: string;
 	openai?: string;
@@ -18,6 +38,8 @@ export interface ApiKeys {
 export interface QcpConfig {
 	version: string;
 	installId: string;
+	databaseConnections: DatabaseConnectionConfig[];
+	activeDatabaseId?: string;
 	databaseType: DatabaseType;
 	databaseUrl?: string;
 	prismaSchemaPath?: string;
@@ -73,6 +95,20 @@ export interface DatabaseSchema {
 	databaseName: string;
 	tableCount: number;
 	tables: SchemaTable[];
+}
+
+export interface SchemaCatalogEntry {
+	connectionId: string;
+	connectionName: string;
+	databaseType: DatabaseType;
+	databaseName: string;
+	scannedAt: string;
+	schema: DatabaseSchema;
+}
+
+export interface SchemaCatalog {
+	version: string;
+	schemas: SchemaCatalogEntry[];
 }
 
 // ─── Safety ───────────────────────────────────────────────────────────────────

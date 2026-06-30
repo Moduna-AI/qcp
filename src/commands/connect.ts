@@ -5,11 +5,17 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 import ora from "ora";
 import {
+	DatabaseConnectionRegistry,
+	normalizeDatabaseAlias,
+} from "@/config/database-connection-registry.js";
+import {
+	getActiveDatabaseConnection,
 	getDatabaseUrl,
 	inferDatabaseType,
 	isDatabaseType,
 	loadConfig,
 	saveConfig,
+	withActiveDatabaseConnection,
 } from "@/config/index.js";
 import { checkReadOnlyUser, testConnection } from "@/db/index.js";
 import { log } from "@/logger/index.js";
@@ -19,9 +25,11 @@ import {
 	printSuccess,
 	printWarning,
 } from "@/output/index.js";
+import { saveSchemaForConnection, scanSchema } from "@/schema/index.js";
 import type { DatabaseType, QcpConfig } from "@/types/index.js";
 
 export interface ConnectOptions {
+	name?: string;
 	type?: string;
 	schema?: string;
 	datasource?: string;
@@ -83,8 +91,10 @@ export async function connectCommand(
 	const config = loadConfig();
 
 	const selectedType = parseDatabaseTypeOption(options.type);
+	const selectedName = parseConnectionNameOption(options.name);
 	const setup = databaseUrl
 		? {
+				name: requireNonInteractiveName(selectedName),
 				url: databaseUrl,
 				databaseType:
 					selectedType ?? inferDatabaseType(databaseUrl, config.databaseType),
@@ -94,8 +104,14 @@ export async function connectCommand(
 					options,
 				),
 			}
-		: await resolveInteractiveSetup(config, selectedType, options);
+		: await resolveInteractiveSetup(
+				config,
+				selectedName,
+				selectedType,
+				options,
+			);
 
+	const name = setup.name;
 	const url = setup.url;
 	const databaseType = setup.databaseType;
 	const prismaSchemaPath =
@@ -107,7 +123,7 @@ export async function connectCommand(
 		printError(
 			"No database URL provided.",
 			"Run `qcp connect` for guided setup, or use:\n" +
-				"  qcp connect postgres://user:pass@host:5432/dbname\n" +
+				"  qcp connect --name prod postgres://user:pass@host:5432/dbname\n" +
 				"Or set the QCP_DATABASE_URL environment variable.",
 		);
 		process.exit(1);
@@ -138,18 +154,31 @@ export async function connectCommand(
 
 		spinner.succeed(`Connected to ${result.version}`);
 
-		// Save URL to config
-		saveConfig({
+		const registry = new DatabaseConnectionRegistry(config);
+		const snapshot = registry.upsert(
+			{
+				name,
+				databaseType,
+				databaseUrl: url,
+				prismaSchemaPath,
+				prismaDatasourceName,
+			},
+			{ setActive: true },
+		);
+		const savedConfig = saveConfig({
 			...config,
-			databaseType,
-			databaseUrl: url,
-			prismaSchemaPath,
-			prismaDatasourceName,
+			databaseConnections: snapshot.connections,
+			activeDatabaseId: snapshot.activeDatabaseId,
 		});
+		const connection = getActiveDatabaseConnection(savedConfig, name);
+		if (!connection) {
+			printError(`Database connection not found after saving: ${name}`);
+			process.exit(1);
+		}
 
 		// Check read-only permissions
 		const readOnlySpinner = ora("Checking permissions...").start();
-		const isReadOnly = await checkReadOnlyUser(url);
+		const isReadOnly = await checkReadOnlyUser(connection.databaseUrl);
 
 		if (isReadOnly) {
 			readOnlySpinner.succeed("Read-only user verified");
@@ -170,13 +199,29 @@ export async function connectCommand(
 			);
 		}
 
+		const schemaSpinner = ora("Scanning schema...").start();
+		try {
+			const schema = await scanSchema(connection.databaseUrl);
+			saveSchemaForConnection(connection, schema);
+			schemaSpinner.succeed(
+				`Schema indexed (${schema.tableCount} tables from ${schema.databaseName})`,
+			);
+		} catch (err: unknown) {
+			schemaSpinner.fail("Schema scan failed");
+			const message = err instanceof Error ? err.message : String(err);
+			printWarning(
+				`Connection was saved, but schema scan failed: ${message}\nRun: qcp schema scan --database ${name}`,
+			);
+		}
+
 		printSuccess("Database connection saved");
+		printInfo(`Connection: ${name} (active)`);
 		printInfo(`Database type: ${DATABASE_TYPE_INFO[databaseType].label}`);
 		if (prismaSchemaPath) printInfo(`Prisma schema: ${prismaSchemaPath}`);
 		if (prismaDatasourceName) {
 			printInfo(`Prisma datasource: ${prismaDatasourceName}`);
 		}
-		printInfo("Run `qcp schema scan` to index your database schema");
+		printInfo("Run `qcp db list` to view configured databases");
 
 		log("info", "Database connected", { version: result.version });
 	} catch (err: unknown) {
@@ -220,11 +265,37 @@ function parseDatabaseTypeOption(
 	process.exit(1);
 }
 
+function parseConnectionNameOption(
+	name: string | undefined,
+): string | undefined {
+	if (!name) return undefined;
+
+	try {
+		return normalizeDatabaseAlias(name);
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		printError(message);
+		process.exit(1);
+	}
+}
+
+function requireNonInteractiveName(name: string | undefined): string {
+	if (name) return name;
+
+	printError(
+		"Connection name is required.",
+		"Use: qcp connect --name prod postgres://readonly_user:password@host/db",
+	);
+	process.exit(1);
+}
+
 async function resolveInteractiveSetup(
 	config: QcpConfig,
+	selectedName: string | undefined,
 	selectedType: DatabaseType | undefined,
 	options: ConnectOptions,
 ): Promise<{
+	name: string;
 	url: string | undefined;
 	databaseType: DatabaseType;
 	prismaSchemaPath?: string;
@@ -236,6 +307,7 @@ async function resolveInteractiveSetup(
 			selectedType ??
 			(url ? inferDatabaseType(url, config.databaseType) : config.databaseType);
 		return {
+			name: requireNonInteractiveName(selectedName),
 			url,
 			databaseType,
 			prismaSchemaPath:
@@ -249,6 +321,19 @@ async function resolveInteractiveSetup(
 					: undefined,
 		};
 	}
+
+	const { name } = selectedName
+		? { name: selectedName }
+		: await inquirer.prompt<{ name: string }>([
+				{
+					type: "input",
+					name: "name",
+					message: "Connection alias:",
+					default: "default",
+					filter: (value: string) => value.trim().toLowerCase(),
+					validate: validateConnectionName,
+				},
+			]);
 
 	const { databaseType } = await inquirer.prompt<{
 		databaseType: DatabaseType;
@@ -269,7 +354,22 @@ async function resolveInteractiveSetup(
 
 	printConnectionGuidance(databaseType);
 
-	const existingUrl = getDatabaseUrl(config);
+	const existingConnection = new DatabaseConnectionRegistry(config).findByName(
+		name,
+	);
+	const existingUrl = existingConnection
+		? getActiveDatabaseConnection(
+				withActiveDatabaseConnection(config, {
+					id: existingConnection.id,
+					name: existingConnection.name,
+					databaseType: existingConnection.databaseType,
+					databaseUrl: existingConnection.databaseUrl,
+					prismaSchemaPath: existingConnection.prismaSchemaPath,
+					prismaDatasourceName: existingConnection.prismaDatasourceName,
+				}),
+				name,
+			)?.databaseUrl
+		: undefined;
 	if (existingUrl) {
 		const { useExisting } = await inquirer.prompt<{ useExisting: boolean }>([
 			{
@@ -282,6 +382,7 @@ async function resolveInteractiveSetup(
 
 		if (useExisting) {
 			return {
+				name,
 				url: existingUrl,
 				databaseType,
 				...(await resolvePrismaSetup(config, databaseType, options)),
@@ -300,6 +401,7 @@ async function resolveInteractiveSetup(
 	]);
 
 	return {
+		name,
 		url: url.trim(),
 		databaseType,
 		...(await resolvePrismaSetup(config, databaseType, options)),
@@ -378,6 +480,15 @@ function validateDatabaseUrl(input: string): true | string {
 	return true;
 }
 
+function validateConnectionName(input: string): true | string {
+	try {
+		normalizeDatabaseAlias(input);
+		return true;
+	} catch (err: unknown) {
+		return err instanceof Error ? err.message : String(err);
+	}
+}
+
 function validatePrismaSchemaPath(input: string): true | string {
 	const value = input.trim();
 	if (!value) return "Prisma schema path cannot be empty";
@@ -404,16 +515,16 @@ function normalizeOptional(value: string | undefined): string | undefined {
 
 export async function showConnectionStatus(): Promise<void> {
 	const config = loadConfig();
-	const url = getDatabaseUrl(config);
+	const connection = getActiveDatabaseConnection(config);
 
-	if (!url) {
+	if (!connection) {
 		printInfo("No database connection configured.");
 		printInfo("Run: qcp connect");
 		return;
 	}
 
-	const spinner = ora("Checking connection...").start();
-	const result = await testConnection(url);
+	const spinner = ora(`Checking connection ${connection.name}...`).start();
+	const result = await testConnection(connection.databaseUrl);
 
 	if (result.connected) {
 		spinner.succeed(`Connected: ${result.version}`);

@@ -1,7 +1,12 @@
 import inquirer from "inquirer";
 import ora from "ora";
 import { QcpSupervisorAgent } from "@/agents/index.js";
-import { ensureConfigDir, getDatabaseUrl, loadConfig } from "@/config/index.js";
+import {
+	ensureConfigDir,
+	getActiveDatabaseConnection,
+	loadConfig,
+	withActiveDatabaseConnection,
+} from "@/config/index.js";
 import { log } from "@/logger/index.js";
 import {
 	printApprovalWarning,
@@ -13,7 +18,7 @@ import {
 	printSummary,
 } from "@/output/index.js";
 import { classifyPromptViolation } from "@/safety/index.js";
-import { loadSchema, schemaToContext } from "@/schema/index.js";
+import { loadSchemaForConnection, schemaToContext } from "@/schema/index.js";
 import {
 	initTelemetry,
 	shutdownTelemetry,
@@ -46,20 +51,23 @@ export async function askCommand(
 	initTelemetry(config);
 	trackActive();
 
-	const databaseUrl = getDatabaseUrl(config);
-	if (!databaseUrl) {
+	const connection = getActiveDatabaseConnection(config);
+	if (!connection) {
 		printError("No database connection configured.", "Run: qcp connect");
 		await shutdownTelemetry();
 		process.exit(1);
 	}
+	const activeConfig = withActiveDatabaseConnection(config, connection);
 
 	// ── Load schema once ──────────────────────────────────────────────────────────
 	const schemaSpinner = ora("Loading schema...").start();
 	let schema: DatabaseSchema;
 
 	try {
-		schema = loadSchema();
-		schemaSpinner.succeed(`Schema loaded (${schema.tableCount} tables)`);
+		schema = loadSchemaForConnection(connection).schema;
+		schemaSpinner.succeed(
+			`Schema loaded (${connection.name} · ${schema.tableCount} tables)`,
+		);
 		if (options.verbose || options.debug) {
 			printInfo(`Schema context: ~${schemaToContext(schema).length} chars`);
 		}
@@ -75,14 +83,16 @@ export async function askCommand(
 	let supervisor: QcpSupervisorAgent;
 	try {
 		supervisor = new QcpSupervisorAgent({
-			config,
-			databaseUrl,
+			config: activeConfig,
+			connectionName: connection.name,
+			databaseUrl: connection.databaseUrl,
 			schema,
 			approvalHandler: async (reasons, sql) =>
-				confirmAskToolExecution(reasons, sql, config, options),
+				confirmAskToolExecution(reasons, sql, activeConfig, options),
 		});
 		if (options.verbose || options.debug) {
-			printInfo(`Provider: ${config.provider} / ${config.model}`);
+			printInfo(`Database: ${connection.name}`);
+			printInfo(`Provider: ${activeConfig.provider} / ${activeConfig.model}`);
 			printInfo(
 				`Database subagent: ${supervisor.getDatabaseAgent().getName()}`,
 			);

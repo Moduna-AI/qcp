@@ -4,7 +4,14 @@ import { join } from "node:path";
 import "dotenv/config";
 import { v7 as uuidv7 } from "uuid";
 import { z } from "zod";
-import type { DatabaseType, ProviderName, QcpConfig } from "@/types/index.js";
+import type {
+	ActiveDatabaseConnection,
+	DatabaseConnectionConfig,
+	DatabaseType,
+	ProviderName,
+	QcpConfig,
+} from "@/types/index.js";
+import { DatabaseConnectionRegistry } from "./database-connection-registry.js";
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
 
@@ -13,6 +20,7 @@ export const CONFIG_PATH = join(QCP_HOME, "config.json");
 export const LOGS_DIR = join(QCP_HOME, "logs");
 export const LOCAL_QCP_DIR = ".qcp";
 export const LOCAL_SCHEMA_PATH = join(LOCAL_QCP_DIR, "schema.json");
+export const LOCAL_SCHEMA_CATALOG_PATH = join(QCP_HOME, "schemas.json");
 export const LOCAL_SUPPORT_DIR = join(LOCAL_QCP_DIR, "support");
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
@@ -33,9 +41,22 @@ export const DATABASE_TYPES = [
 
 const DatabaseTypeSchema = z.enum(DATABASE_TYPES);
 
+const DatabaseConnectionConfigSchema = z.object({
+	id: z.string().min(1),
+	name: z.string().min(1),
+	databaseType: DatabaseTypeSchema,
+	databaseUrl: z.string().min(1),
+	prismaSchemaPath: z.string().optional(),
+	prismaDatasourceName: z.string().optional(),
+	createdAt: z.string().default(() => new Date().toISOString()),
+	updatedAt: z.string().default(() => new Date().toISOString()),
+});
+
 const QcpConfigSchema = z.object({
 	version: z.string().default("0.1.0"),
 	installId: z.string().default(() => uuidv7()),
+	databaseConnections: z.array(DatabaseConnectionConfigSchema).default([]),
+	activeDatabaseId: z.string().optional(),
 	databaseType: DatabaseTypeSchema.default("other-postgres"),
 	databaseUrl: z.string().optional(),
 	prismaSchemaPath: z.string().optional(),
@@ -128,7 +149,7 @@ export function loadConfig(): QcpConfig {
 			);
 			return parseQcpConfig(parsed);
 		}
-		return result.data as QcpConfig;
+		return normalizeConfig(result.data as QcpConfig);
 	} catch {
 		return createDefaultConfig();
 	}
@@ -138,18 +159,58 @@ export function saveConfig(config: Partial<QcpConfig>): QcpConfig {
 	ensureConfigDir();
 	const current = configExists() ? loadConfig() : createDefaultConfig();
 	const merged = { ...current, ...config };
-	const validated = QcpConfigSchema.parse(merged) as QcpConfig;
+	const validated = normalizeConfig(QcpConfigSchema.parse(merged) as QcpConfig);
 	writeFileSync(CONFIG_PATH, JSON.stringify(validated, null, 2));
 	return validated;
 }
 
 export function createDefaultConfig(): QcpConfig {
-	const config = QcpConfigSchema.parse({}) as QcpConfig;
-	return config;
+	return normalizeConfig(QcpConfigSchema.parse({}) as QcpConfig);
 }
 
 export function parseQcpConfig(config: unknown): QcpConfig {
-	return QcpConfigSchema.parse(config) as QcpConfig;
+	return normalizeConfig(QcpConfigSchema.parse(config) as QcpConfig);
+}
+
+function normalizeConfig(config: QcpConfig): QcpConfig {
+	const migrated = migrateLegacyDatabaseConnection(config);
+	const registry = new DatabaseConnectionRegistry(migrated);
+	const active = registry.resolveActive();
+
+	return {
+		...migrated,
+		databaseConnections: registry.list(),
+		activeDatabaseId: active?.id ?? migrated.activeDatabaseId,
+		databaseType: active?.databaseType ?? migrated.databaseType,
+		databaseUrl: active?.databaseUrl ?? migrated.databaseUrl,
+		prismaSchemaPath: active?.prismaSchemaPath ?? migrated.prismaSchemaPath,
+		prismaDatasourceName:
+			active?.prismaDatasourceName ?? migrated.prismaDatasourceName,
+	};
+}
+
+function migrateLegacyDatabaseConnection(config: QcpConfig): QcpConfig {
+	if (config.databaseConnections.length > 0 || !config.databaseUrl) {
+		return config;
+	}
+
+	const now = new Date().toISOString();
+	const connection: DatabaseConnectionConfig = {
+		id: "default",
+		name: "default",
+		databaseType: config.databaseType,
+		databaseUrl: config.databaseUrl,
+		prismaSchemaPath: config.prismaSchemaPath,
+		prismaDatasourceName: config.prismaDatasourceName,
+		createdAt: now,
+		updatedAt: now,
+	};
+
+	return {
+		...config,
+		databaseConnections: [connection],
+		activeDatabaseId: connection.id,
+	};
 }
 
 // ─── Getters / Setters ────────────────────────────────────────────────────────
@@ -176,20 +237,38 @@ export function setApiKey(provider: ProviderName, key: string): void {
 }
 
 export function getDatabaseUrl(config: QcpConfig): string | undefined {
+	const active = getActiveDatabaseConnection(config);
+	if (active) return active.databaseUrl;
+
 	if (config.databaseType === "prisma-postgres") {
 		return (
 			process.env.PRISMA_DATABASE_URL ??
-			config.databaseUrl ??
 			process.env.DATABASE_URL ??
 			process.env.QCP_DATABASE_URL
 		);
 	}
 
-	return (
-		config.databaseUrl ??
-		process.env.DATABASE_URL ??
-		process.env.QCP_DATABASE_URL
-	);
+	return process.env.DATABASE_URL ?? process.env.QCP_DATABASE_URL;
+}
+
+export function getActiveDatabaseConnection(
+	config: QcpConfig,
+	name?: string,
+): ActiveDatabaseConnection | undefined {
+	return new DatabaseConnectionRegistry(config).resolveActive(name);
+}
+
+export function withActiveDatabaseConnection(
+	config: QcpConfig,
+	connection: ActiveDatabaseConnection,
+): QcpConfig {
+	return {
+		...config,
+		databaseType: connection.databaseType,
+		databaseUrl: connection.databaseUrl,
+		prismaSchemaPath: connection.prismaSchemaPath,
+		prismaDatasourceName: connection.prismaDatasourceName,
+	};
 }
 
 export function isDatabaseType(value: string): value is DatabaseType {
@@ -236,7 +315,7 @@ export function ensureLocalDir(): void {
 }
 
 export function localSchemaExists(): boolean {
-	return existsSync(LOCAL_SCHEMA_PATH);
+	return existsSync(LOCAL_SCHEMA_CATALOG_PATH) || existsSync(LOCAL_SCHEMA_PATH);
 }
 
 // ─── Redaction (for support bundles) ─────────────────────────────────────────
@@ -245,6 +324,17 @@ export function redactConfig(config: QcpConfig): Record<string, unknown> {
 	return {
 		version: config.version,
 		installId: config.installId,
+		activeDatabaseId: config.activeDatabaseId,
+		databaseConnections: config.databaseConnections.map((connection) => ({
+			id: connection.id,
+			name: connection.name,
+			databaseType: connection.databaseType,
+			databaseUrl: "[REDACTED]",
+			prismaSchemaPath: connection.prismaSchemaPath,
+			prismaDatasourceName: connection.prismaDatasourceName,
+			createdAt: connection.createdAt,
+			updatedAt: connection.updatedAt,
+		})),
 		databaseType: config.databaseType,
 		provider: config.provider,
 		model: config.model,

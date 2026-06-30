@@ -7,7 +7,7 @@ import {
 	createDefaultConfig,
 	ensureConfigDir,
 	LOCAL_QCP_DIR,
-	LOCAL_SCHEMA_PATH,
+	LOCAL_SCHEMA_CATALOG_PATH,
 	saveConfig,
 } from "@/config/index.js";
 import {
@@ -81,23 +81,20 @@ export async function initCommand(): Promise<void> {
 	// ── Create local .qcp/ project directory ─────────────────────────────────
 	const alreadyHasLocal = existsSync(LOCAL_QCP_DIR);
 
+	if (!existsSync(LOCAL_SCHEMA_CATALOG_PATH)) {
+		writeFileSync(
+			LOCAL_SCHEMA_CATALOG_PATH,
+			JSON.stringify({ version: "1", schemas: [] }, null, 2),
+		);
+	}
+
 	if (!alreadyHasLocal) {
 		mkdirSync(LOCAL_QCP_DIR, { recursive: true });
 
-		// Create a stub schema.json so the path is predictable
-		if (!existsSync(LOCAL_SCHEMA_PATH)) {
-			writeFileSync(
-				LOCAL_SCHEMA_PATH,
-				JSON.stringify(
-					{ scannedAt: null, databaseName: "", tableCount: 0, tables: [] },
-					null,
-					2,
-				),
-			);
-		}
-
 		printSuccess("Created .qcp/ project directory");
-		printInfo("Run `qcp connect` to add your database connection");
+		printInfo(
+			"Run `qcp connect --name default` to add your database connection",
+		);
 		printInfo("Run `qcp schema scan` to scan your database schema");
 	} else {
 		printInfo(".qcp/ project directory already exists");
@@ -118,7 +115,7 @@ export async function initCommand(): Promise<void> {
 	console.log();
 	console.log(chalk.bold("Next steps:"));
 	console.log(chalk.dim("  1. ") + chalk.white("qcp connect"));
-	console.log(chalk.dim("  2. ") + chalk.white("qcp schema scan"));
+	console.log(chalk.dim("  2. ") + chalk.white("qcp db list"));
 	console.log(
 		chalk.dim("  3. ") +
 			chalk.white('qcp ask "What were our top customers last month?"'),
