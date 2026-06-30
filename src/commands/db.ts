@@ -10,6 +10,11 @@ import {
 	saveConfig,
 } from "@/config/index.js";
 import {
+	buildAuditResource,
+	resolveAuditActor,
+	writeAuditEvent,
+} from "@/logger/audit.js";
+import {
 	printError,
 	printInfo,
 	printSection,
@@ -70,7 +75,7 @@ export function dbCurrentCommand(): void {
 	);
 }
 
-export function dbUseCommand(name: string): void {
+export async function dbUseCommand(name: string): Promise<void> {
 	const config = loadConfig();
 	const registry = new DatabaseConnectionRegistry(config);
 
@@ -82,9 +87,19 @@ export function dbUseCommand(name: string): void {
 			databaseConnections: snapshot.connections,
 			activeDatabaseId: snapshot.activeDatabaseId,
 		});
+		const connection = registry.findByName(alias);
+		await auditDbEvent(config, "db use", "CONNECTION_CHANGE", "success", {
+			connectionId: connection?.id,
+			connectionName: alias,
+			databaseType: connection?.databaseType,
+		});
 		printSuccess(`Active database = ${alias}`);
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
+		await auditDbEvent(config, "db use", "CONNECTION_CHANGE", "failure", {
+			connectionName: name,
+			error: message,
+		});
 		printError(message);
 		process.exit(1);
 	}
@@ -127,5 +142,43 @@ export async function dbRemoveCommand(
 		activeDatabaseId: snapshot.activeDatabaseId,
 	});
 	removeSchemaForConnection(connection.id);
+	await auditDbEvent(config, "db remove", "CONNECTION_CHANGE", "success", {
+		connectionId: connection.id,
+		connectionName: alias,
+		databaseType: connection.databaseType,
+	});
 	printSuccess(`Removed database connection: ${alias}`);
+}
+
+async function auditDbEvent(
+	config: ReturnType<typeof loadConfig>,
+	command: string,
+	action: "CONNECTION_CHANGE",
+	outcome: "success" | "failure",
+	resource: {
+		readonly connectionId?: string;
+		readonly connectionName?: string;
+		readonly databaseType?: ReturnType<typeof loadConfig>["databaseType"];
+		readonly error?: string;
+	},
+): Promise<void> {
+	await writeAuditEvent({
+		scope: "system_admin",
+		action,
+		actor: resolveAuditActor(config.installId),
+		resource: buildAuditResource({
+			command,
+			installId: config.installId,
+			connectionId: resource.connectionId,
+			connectionName: resource.connectionName,
+			databaseType: resource.databaseType,
+			provider: config.provider,
+			model: config.model,
+		}),
+		delta: null,
+		outcome,
+		metadata: {
+			error: resource.error ?? null,
+		},
+	});
 }

@@ -1,6 +1,7 @@
 import type { ToolsInput } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
+import type { AuditContext } from "@/logger/audit.js";
 import type { DatabaseSchema } from "@/types/index.js";
 import type { DatabaseAgentType } from "./database-agent.js";
 import {
@@ -51,6 +52,7 @@ export interface SupabaseAgentConfig<TAgentId extends string = string>
 	readonly queryExecutor?: DatabaseQueryExecutor;
 	readonly explainExecutor?: DatabaseExplainExecutor;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
+	readonly auditContext?: AuditContext;
 }
 
 export class SupabaseAgent<
@@ -71,6 +73,7 @@ export class SupabaseAgent<
 							queryExecutor: config.queryExecutor,
 							explainExecutor: config.explainExecutor,
 							approvalHandler: config.approvalHandler,
+							auditContext: config.auditContext,
 						})
 					: {}),
 			},
@@ -116,6 +119,7 @@ export interface CreateSupabaseToolsOptions {
 	readonly queryExecutor?: DatabaseQueryExecutor;
 	readonly explainExecutor?: DatabaseExplainExecutor;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
+	readonly auditContext?: AuditContext;
 }
 
 export function createSupabaseTools(
@@ -129,6 +133,7 @@ export function createSupabaseTools(
 			queryExecutor: options.queryExecutor,
 			explainExecutor: options.explainExecutor,
 			approvalHandler: options.approvalHandler,
+			auditContext: options.auditContext,
 		}),
 		qcp_read_supabase_context: createTool({
 			id: "qcp_read_supabase_context",

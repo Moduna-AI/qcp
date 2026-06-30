@@ -18,6 +18,11 @@ import {
 	withActiveDatabaseConnection,
 } from "@/config/index.js";
 import { checkReadOnlyUser, testConnection } from "@/db/index.js";
+import {
+	buildAuditResource,
+	resolveAuditActor,
+	writeAuditEvent,
+} from "@/logger/audit.js";
 import { log } from "@/logger/index.js";
 import {
 	printError,
@@ -139,6 +144,13 @@ export async function connectCommand(
 		if (!result.connected) {
 			spinner.fail("Connection failed");
 			printError(result.error ?? "Unknown connection error");
+			await auditConnectionEvent(config, {
+				name,
+				databaseType,
+				action: "CONNECTION_CHANGE",
+				outcome: "failure",
+				error: result.error ?? "Unknown connection error",
+			});
 			console.log();
 			printInfo("Common fixes:");
 			console.log(
@@ -200,8 +212,10 @@ export async function connectCommand(
 		}
 
 		const schemaSpinner = ora("Scanning schema...").start();
+		let scannedDatabaseName: string | undefined;
 		try {
 			const schema = await scanSchema(connection.databaseUrl);
+			scannedDatabaseName = schema.databaseName;
 			saveSchemaForConnection(connection, schema);
 			schemaSpinner.succeed(
 				`Schema indexed (${schema.tableCount} tables from ${schema.databaseName})`,
@@ -223,14 +237,66 @@ export async function connectCommand(
 		}
 		printInfo("Run `qcp db list` to view configured databases");
 
+		await auditConnectionEvent(savedConfig, {
+			name: connection.name,
+			connectionId: connection.id,
+			databaseType,
+			action: "CONNECTION_CHANGE",
+			outcome: "success",
+			databaseName: scannedDatabaseName,
+			readOnly: isReadOnly,
+		});
 		log("info", "Database connected", { version: result.version });
 	} catch (err: unknown) {
 		spinner.fail("Connection test failed");
 		const message = err instanceof Error ? err.message : String(err);
 		printError(message);
+		await auditConnectionEvent(config, {
+			name,
+			databaseType,
+			action: "CONNECTION_CHANGE",
+			outcome: "failure",
+			error: message,
+		});
 		log("error", "Connection failed", { error: message });
 		process.exit(1);
 	}
+}
+
+async function auditConnectionEvent(
+	config: QcpConfig,
+	event: {
+		readonly name: string;
+		readonly connectionId?: string;
+		readonly databaseType: DatabaseType;
+		readonly action: "CONNECTION_CHANGE";
+		readonly outcome: "success" | "failure";
+		readonly databaseName?: string;
+		readonly readOnly?: boolean;
+		readonly error?: string;
+	},
+): Promise<void> {
+	await writeAuditEvent({
+		scope: "system_admin",
+		action: event.action,
+		actor: resolveAuditActor(config.installId),
+		resource: buildAuditResource({
+			command: "connect",
+			installId: config.installId,
+			connectionId: event.connectionId,
+			connectionName: event.name,
+			databaseType: event.databaseType,
+			databaseName: event.databaseName,
+			provider: config.provider,
+			model: config.model,
+		}),
+		delta: null,
+		outcome: event.outcome,
+		metadata: {
+			readOnly: event.readOnly ?? null,
+			error: event.error ?? null,
+		},
+	});
 }
 
 function resolveNonInteractivePrismaSetup(

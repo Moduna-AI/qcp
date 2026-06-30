@@ -84,6 +84,8 @@ export async function askCommand(
 	try {
 		supervisor = new QcpSupervisorAgent({
 			config: activeConfig,
+			command: "ask",
+			connectionId: connection.id,
 			connectionName: connection.name,
 			databaseUrl: connection.databaseUrl,
 			schema,

@@ -6,6 +6,7 @@ import { MCPClient } from "@mastra/mcp";
 import { z } from "zod";
 import { executeQuery, explainQuery } from "@/db/index.js";
 import { extractSqlAndExplanation } from "@/llm/prompts.js";
+import type { AuditContext } from "@/logger/audit.js";
 import {
 	enforceTenantIsolation,
 	getApprovalReasons,
@@ -88,6 +89,7 @@ export interface PrismaAgentConfig<TAgentId extends string = string>
 	readonly sensitiveTablePatterns?: readonly string[];
 	readonly queryExecutor?: PrismaQueryExecutor;
 	readonly explainExecutor?: PrismaExplainExecutor;
+	readonly auditContext?: AuditContext;
 }
 
 export class PrismaAgent<
@@ -109,6 +111,7 @@ export class PrismaAgent<
 							sensitiveTablePatterns: config.sensitiveTablePatterns,
 							queryExecutor: config.queryExecutor,
 							explainExecutor: config.explainExecutor,
+							auditContext: config.auditContext,
 						})
 					: {}),
 			},
@@ -149,6 +152,7 @@ export interface CreatePrismaToolsOptions {
 	readonly sensitiveTablePatterns?: readonly string[];
 	readonly queryExecutor?: PrismaQueryExecutor;
 	readonly explainExecutor?: PrismaExplainExecutor;
+	readonly auditContext?: AuditContext;
 }
 
 export function createPrismaTools(
@@ -163,6 +167,7 @@ export function createPrismaTools(
 			queryExecutor: options.queryExecutor,
 			explainExecutor: options.explainExecutor,
 			enforceTenantIsolation: true,
+			auditContext: options.auditContext,
 		}),
 		qcp_read_prisma_context: createTool({
 			id: "qcp_read_prisma_context",
