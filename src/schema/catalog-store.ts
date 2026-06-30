@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { ensureLocalDir, LOCAL_SCHEMA_PATH } from "@/config/index.js";
+import { ensureConfigDir, LOCAL_SCHEMA_PATH } from "@/config/index.js";
 import type {
 	ActiveDatabaseConnection,
 	DatabaseSchema,
@@ -31,7 +31,7 @@ export class SchemaCatalogStore {
 	}
 
 	public save(catalog: SchemaCatalog): void {
-		ensureLocalDir();
+		ensureConfigDir();
 		writeFileSync(this.catalogPath, JSON.stringify(catalog, null, 2));
 	}
 

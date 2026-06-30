@@ -164,7 +164,7 @@ const schema = program
 
 schema
 	.command("scan")
-	.description("Scan database and build local schema index (.qcp/schemas.json)")
+	.description("Scan database and build schema index (~/.qcp/schemas.json)")
 	.option("--database <alias>", "Scan a specific configured database")
 	.action(async (options: { database?: string }) => {
 		const { schemaScanCommand } = await import("../commands/schema.js");

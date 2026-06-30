@@ -81,16 +81,15 @@ export async function initCommand(): Promise<void> {
 	// ── Create local .qcp/ project directory ─────────────────────────────────
 	const alreadyHasLocal = existsSync(LOCAL_QCP_DIR);
 
+	if (!existsSync(LOCAL_SCHEMA_CATALOG_PATH)) {
+		writeFileSync(
+			LOCAL_SCHEMA_CATALOG_PATH,
+			JSON.stringify({ version: "1", schemas: [] }, null, 2),
+		);
+	}
+
 	if (!alreadyHasLocal) {
 		mkdirSync(LOCAL_QCP_DIR, { recursive: true });
-
-		// Create a stub schemas.json so the path is predictable
-		if (!existsSync(LOCAL_SCHEMA_CATALOG_PATH)) {
-			writeFileSync(
-				LOCAL_SCHEMA_CATALOG_PATH,
-				JSON.stringify({ version: "1", schemas: [] }, null, 2),
-			);
-		}
 
 		printSuccess("Created .qcp/ project directory");
 		printInfo(
