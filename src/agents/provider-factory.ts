@@ -51,6 +51,8 @@ export function createProviderDatabaseAgent(
 				model,
 				databaseUrl: options.databaseUrl,
 				schema: options.schema,
+				prismaSchemaPath: options.config.prismaSchemaPath,
+				datasourceName: options.config.prismaDatasourceName,
 				sensitiveTablePatterns: options.config.sensitiveTablePatterns,
 				tools,
 			});

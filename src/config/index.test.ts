@@ -29,6 +29,19 @@ describe("database type config", () => {
 		});
 
 		expect(config.databaseType).toBe("other-postgres");
+		expect(config.prismaSchemaPath).toBeUndefined();
+		expect(config.prismaDatasourceName).toBeUndefined();
+	});
+
+	test("parses Prisma schema configuration", () => {
+		const config = parseQcpConfig({
+			databaseType: "prisma-postgres",
+			prismaSchemaPath: "prisma/schema.prisma",
+			prismaDatasourceName: "db",
+		});
+
+		expect(config.prismaSchemaPath).toBe("prisma/schema.prisma");
+		expect(config.prismaDatasourceName).toBe("db");
 	});
 
 	test("validates database type values", () => {

@@ -71,6 +71,7 @@ const prismaContextSchema = z.object({
 	tableCount: z.number(),
 	schemaContext: z.string(),
 	prismaSchemaPath: z.string().optional(),
+	prismaDatasourceName: z.string().optional(),
 	prismaSchema: z.string().optional(),
 });
 
@@ -104,6 +105,7 @@ export class PrismaAgent<
 							databaseUrl: config.databaseUrl,
 							schema: config.schema,
 							prismaSchemaPath: config.prismaSchemaPath,
+							prismaDatasourceName: config.datasourceName,
 							sensitiveTablePatterns: config.sensitiveTablePatterns,
 							queryExecutor: config.queryExecutor,
 							explainExecutor: config.explainExecutor,
@@ -143,6 +145,7 @@ export interface CreatePrismaToolsOptions {
 	readonly databaseUrl: string;
 	readonly schema: DatabaseSchema;
 	readonly prismaSchemaPath?: string;
+	readonly prismaDatasourceName?: string;
 	readonly sensitiveTablePatterns?: readonly string[];
 	readonly queryExecutor?: PrismaQueryExecutor;
 	readonly explainExecutor?: PrismaExplainExecutor;
@@ -187,6 +190,7 @@ export function createPrismaTools(
 					tableCount: options.schema.tableCount,
 					schemaContext: formatSchemaForDatabaseAgent(options.schema),
 					prismaSchemaPath: options.prismaSchemaPath,
+					prismaDatasourceName: options.prismaDatasourceName,
 					prismaSchema,
 				};
 			},
@@ -580,6 +584,7 @@ export interface GeneratePrismaSqlOptions {
 	readonly config: QcpConfig;
 	readonly databaseUrl: string;
 	readonly prismaSchemaPath?: string;
+	readonly prismaDatasourceName?: string;
 	readonly debug?: boolean;
 }
 
@@ -597,6 +602,7 @@ export async function generateSqlWithPrismaAgent(
 		databaseUrl: options.databaseUrl,
 		schema: options.schema,
 		prismaSchemaPath: options.prismaSchemaPath,
+		datasourceName: options.prismaDatasourceName,
 		sensitiveTablePatterns: options.config.sensitiveTablePatterns,
 		instructions: [
 			"Use qcp_read_prisma_context and qcp_validate_sql to improve SQL quality.",
@@ -637,6 +643,7 @@ function buildPrismaAgentPrompt(options: GeneratePrismaSqlOptions): string {
 	return `
 DATABASE SCHEMA:
 ${formatSchemaForPrismaAgent(options.schema)}
+${formatPrismaConfigForPrompt(options)}
 
 USER QUESTION:
 ${options.question}
@@ -676,6 +683,19 @@ function formatSchemaForPrismaAgent(schema: DatabaseSchema): string {
 	}
 
 	return lines.join("\n");
+}
+
+function formatPrismaConfigForPrompt(
+	options: GeneratePrismaSqlOptions,
+): string {
+	const lines: string[] = [];
+	if (options.prismaSchemaPath) {
+		lines.push(`Prisma schema path: ${options.prismaSchemaPath}`);
+	}
+	if (options.prismaDatasourceName) {
+		lines.push(`Prisma datasource name: ${options.prismaDatasourceName}`);
+	}
+	return lines.length > 0 ? `\nPRISMA CONFIG:\n${lines.join("\n")}` : "";
 }
 
 function stringProcessEnv(): Record<string, string> {

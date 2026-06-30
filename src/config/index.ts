@@ -38,6 +38,8 @@ const QcpConfigSchema = z.object({
 	installId: z.string().default(() => uuidv7()),
 	databaseType: DatabaseTypeSchema.default("other-postgres"),
 	databaseUrl: z.string().optional(),
+	prismaSchemaPath: z.string().optional(),
+	prismaDatasourceName: z.string().optional(),
 	provider: z
 		.enum(["gemini", "openai", "anthropic", "ollama"])
 		.default("gemini"),
@@ -251,6 +253,8 @@ export function redactConfig(config: QcpConfig): Record<string, unknown> {
 		showSql: config.showSql,
 		showMetrics: config.showMetrics,
 		databaseUrl: config.databaseUrl ? "[REDACTED]" : undefined,
+		prismaSchemaPath: config.prismaSchemaPath,
+		prismaDatasourceName: config.prismaDatasourceName,
 		apiKeys: {
 			gemini: config.apiKeys.gemini ? "[CONFIGURED]" : undefined,
 			openai: config.apiKeys.openai ? "[CONFIGURED]" : undefined,

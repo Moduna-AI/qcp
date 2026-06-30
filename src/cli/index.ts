@@ -45,9 +45,9 @@ program
 		`
 ${chalk.bold("Example:")}
   qcp auth                                  Interactive setup
-  qcp auth set gemini AIza...               Set key directly
-  qcp auth set openai sk-...
-  qcp auth set anthropic sk-ant-...
+  qcp config set-key gemini AIza...         Set key directly
+  qcp config set-key openai sk-...
+  qcp config set-key anthropic sk-ant-...
 `,
 	)
 	.action(async () => {
@@ -82,6 +82,8 @@ program
 		"--type <database-type>",
 		"Database type: prisma-postgres, neon, supabase, oracle-postgres, other-postgres",
 	)
+	.option("--schema <path>", "Local Prisma schema.prisma path")
+	.option("--datasource <name>", "Prisma datasource name")
 	.addHelpText(
 		"after",
 		`
@@ -89,6 +91,7 @@ ${chalk.bold("Example:")}
   qcp connect
   qcp connect postgres://readonly_user:password@host:5432/mydb
   qcp connect --type neon postgres://readonly_user:password@host/db
+  qcp connect --type prisma-postgres --schema prisma/schema.prisma --datasource db postgres://readonly_user:password@host/db
 
 ${chalk.bold("Tip:")} Create a read-only role for maximum safety:
   CREATE ROLE qcp_readonly;
@@ -98,9 +101,16 @@ ${chalk.bold("Tip:")} Create a read-only role for maximum safety:
 `,
 	)
 	.action(
-		async (databaseUrl: string | undefined, options: { type?: string }) => {
+		async (
+			databaseUrl: string | undefined,
+			options: { type?: string; schema?: string; datasource?: string },
+		) => {
 			const { connectCommand } = await import("../commands/connect.js");
-			await connectCommand(databaseUrl, { type: options.type });
+			await connectCommand(databaseUrl, {
+				type: options.type,
+				schema: options.schema,
+				datasource: options.datasource,
+			});
 		},
 	);
 
@@ -273,6 +283,8 @@ ${chalk.bold("Keys:")}
   showMetrics  true/false   Always show timing/token metrics
   telemetry    true/false   Anonymous usage analytics
   ollamaHost   URL          Ollama server (default: http://localhost:11434)
+  prismaSchemaPath PATH     Local Prisma schema.prisma path
+  prismaDatasourceName NAME Prisma datasource name
   databaseType prisma-postgres/neon/supabase/oracle-postgres/other-postgres
 `,
 	)

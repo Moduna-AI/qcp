@@ -200,6 +200,24 @@ describe("Prisma agent tools", () => {
 		expect(JSON.stringify(modelOutput)).toContain("[REDACTED_EMAIL]");
 	});
 
+	test("returns configured Prisma schema context", async () => {
+		const tools = createPrismaTools({
+			databaseUrl: "postgres://example",
+			schema,
+			prismaSchemaPath: "prisma/schema.prisma",
+			prismaDatasourceName: "db",
+		});
+
+		const result = await executeTool(tools, "qcp_read_prisma_context", {});
+		const output = result as {
+			prismaSchemaPath?: string;
+			prismaDatasourceName?: string;
+		};
+
+		expect(output.prismaSchemaPath).toBe("prisma/schema.prisma");
+		expect(output.prismaDatasourceName).toBe("db");
+	});
+
 	test("requires approval for sensitive or high-cost queries", async () => {
 		const sensitiveTools = createPrismaTools({
 			databaseUrl: "postgres://example",

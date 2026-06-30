@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { isatty } from "node:tty";
 import chalk from "chalk";
 import inquirer from "inquirer";
@@ -21,6 +23,8 @@ import type { DatabaseType, QcpConfig } from "@/types/index.js";
 
 export interface ConnectOptions {
 	type?: string;
+	schema?: string;
+	datasource?: string;
 }
 
 interface DatabaseTypeInfo {
@@ -84,11 +88,20 @@ export async function connectCommand(
 				url: databaseUrl,
 				databaseType:
 					selectedType ?? inferDatabaseType(databaseUrl, config.databaseType),
+				...resolveNonInteractivePrismaSetup(
+					config,
+					selectedType ?? inferDatabaseType(databaseUrl, config.databaseType),
+					options,
+				),
 			}
-		: await resolveInteractiveSetup(config, selectedType);
+		: await resolveInteractiveSetup(config, selectedType, options);
 
 	const url = setup.url;
 	const databaseType = setup.databaseType;
+	const prismaSchemaPath =
+		databaseType === "prisma-postgres" ? setup.prismaSchemaPath : undefined;
+	const prismaDatasourceName =
+		databaseType === "prisma-postgres" ? setup.prismaDatasourceName : undefined;
 
 	if (!url) {
 		printError(
@@ -126,7 +139,13 @@ export async function connectCommand(
 		spinner.succeed(`Connected to ${result.version}`);
 
 		// Save URL to config
-		saveConfig({ ...config, databaseType, databaseUrl: url });
+		saveConfig({
+			...config,
+			databaseType,
+			databaseUrl: url,
+			prismaSchemaPath,
+			prismaDatasourceName,
+		});
 
 		// Check read-only permissions
 		const readOnlySpinner = ora("Checking permissions...").start();
@@ -153,6 +172,10 @@ export async function connectCommand(
 
 		printSuccess("Database connection saved");
 		printInfo(`Database type: ${DATABASE_TYPE_INFO[databaseType].label}`);
+		if (prismaSchemaPath) printInfo(`Prisma schema: ${prismaSchemaPath}`);
+		if (prismaDatasourceName) {
+			printInfo(`Prisma datasource: ${prismaDatasourceName}`);
+		}
 		printInfo("Run `qcp schema scan` to index your database schema");
 
 		log("info", "Database connected", { version: result.version });
@@ -163,6 +186,24 @@ export async function connectCommand(
 		log("error", "Connection failed", { error: message });
 		process.exit(1);
 	}
+}
+
+function resolveNonInteractivePrismaSetup(
+	config: QcpConfig,
+	databaseType: DatabaseType,
+	options: ConnectOptions,
+): {
+	prismaSchemaPath?: string;
+	prismaDatasourceName?: string;
+} {
+	if (databaseType !== "prisma-postgres") return {};
+
+	return {
+		prismaSchemaPath:
+			normalizeOptional(options.schema) ?? config.prismaSchemaPath,
+		prismaDatasourceName:
+			normalizeOptional(options.datasource) ?? config.prismaDatasourceName,
+	};
 }
 
 function parseDatabaseTypeOption(
@@ -182,16 +223,30 @@ function parseDatabaseTypeOption(
 async function resolveInteractiveSetup(
 	config: QcpConfig,
 	selectedType: DatabaseType | undefined,
-): Promise<{ url: string | undefined; databaseType: DatabaseType }> {
+	options: ConnectOptions,
+): Promise<{
+	url: string | undefined;
+	databaseType: DatabaseType;
+	prismaSchemaPath?: string;
+	prismaDatasourceName?: string;
+}> {
 	if (!isatty(process.stdin.fd as number)) {
 		const url = getDatabaseUrl(config);
+		const databaseType =
+			selectedType ??
+			(url ? inferDatabaseType(url, config.databaseType) : config.databaseType);
 		return {
 			url,
-			databaseType:
-				selectedType ??
-				(url
-					? inferDatabaseType(url, config.databaseType)
-					: config.databaseType),
+			databaseType,
+			prismaSchemaPath:
+				databaseType === "prisma-postgres"
+					? (normalizeOptional(options.schema) ?? config.prismaSchemaPath)
+					: undefined,
+			prismaDatasourceName:
+				databaseType === "prisma-postgres"
+					? (normalizeOptional(options.datasource) ??
+						config.prismaDatasourceName)
+					: undefined,
 		};
 	}
 
@@ -229,6 +284,7 @@ async function resolveInteractiveSetup(
 			return {
 				url: existingUrl,
 				databaseType,
+				...(await resolvePrismaSetup(config, databaseType, options)),
 			};
 		}
 	}
@@ -246,6 +302,60 @@ async function resolveInteractiveSetup(
 	return {
 		url: url.trim(),
 		databaseType,
+		...(await resolvePrismaSetup(config, databaseType, options)),
+	};
+}
+
+async function resolvePrismaSetup(
+	config: QcpConfig,
+	databaseType: DatabaseType,
+	options: ConnectOptions,
+): Promise<{
+	prismaSchemaPath?: string;
+	prismaDatasourceName?: string;
+}> {
+	if (databaseType !== "prisma-postgres") return {};
+
+	const providedSchemaPath = normalizeOptional(options.schema);
+	const providedDatasourceName = normalizeOptional(options.datasource);
+	if (providedSchemaPath && providedDatasourceName) {
+		return {
+			prismaSchemaPath: providedSchemaPath,
+			prismaDatasourceName: providedDatasourceName,
+		};
+	}
+
+	const defaultSchemaPath =
+		providedSchemaPath ?? config.prismaSchemaPath ?? "prisma/schema.prisma";
+	const defaultDatasourceName =
+		providedDatasourceName ?? config.prismaDatasourceName ?? "db";
+
+	const answers = await inquirer.prompt<{
+		prismaSchemaPath: string;
+		prismaDatasourceName: string;
+	}>([
+		{
+			type: "input",
+			name: "prismaSchemaPath",
+			message: "Local schema.prisma path:",
+			default: defaultSchemaPath,
+			validate: validatePrismaSchemaPath,
+			when: !providedSchemaPath,
+		},
+		{
+			type: "input",
+			name: "prismaDatasourceName",
+			message: "Prisma datasource name:",
+			default: defaultDatasourceName,
+			validate: validatePrismaDatasourceName,
+			when: !providedDatasourceName,
+		},
+	]);
+
+	return {
+		prismaSchemaPath: providedSchemaPath ?? answers.prismaSchemaPath.trim(),
+		prismaDatasourceName:
+			providedDatasourceName ?? answers.prismaDatasourceName.trim(),
 	};
 }
 
@@ -266,6 +376,30 @@ function validateDatabaseUrl(input: string): true | string {
 		return "Use a PostgreSQL URL that starts with postgres:// or postgresql://";
 	}
 	return true;
+}
+
+function validatePrismaSchemaPath(input: string): true | string {
+	const value = input.trim();
+	if (!value) return "Prisma schema path cannot be empty";
+	if (!value.endsWith(".prisma")) return "Use a .prisma schema file";
+	if (!existsSync(resolve(value))) {
+		return "File does not exist from the current working directory";
+	}
+	return true;
+}
+
+function validatePrismaDatasourceName(input: string): true | string {
+	const value = input.trim();
+	if (!value) return "Datasource name cannot be empty";
+	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+		return "Use a valid Prisma identifier, such as db";
+	}
+	return true;
+}
+
+function normalizeOptional(value: string | undefined): string | undefined {
+	const trimmed = value?.trim();
+	return trimmed ? trimmed : undefined;
 }
 
 export async function showConnectionStatus(): Promise<void> {
