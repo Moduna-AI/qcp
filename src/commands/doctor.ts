@@ -5,8 +5,7 @@ import { ZipArchive } from "archiver";
 import chalk from "chalk";
 import ora from "ora";
 import {
-	getDatabaseUrl,
-	LOCAL_SCHEMA_PATH,
+	getActiveDatabaseConnection,
 	LOCAL_SUPPORT_DIR,
 	LOGS_DIR,
 	loadConfig,
@@ -20,7 +19,10 @@ import {
 	printInfo,
 	printSection,
 } from "@/output/index.js";
-import { loadSchema } from "@/schema/index.js";
+import {
+	loadSchemaForConnection,
+	schemaCatalogHasConnection,
+} from "@/schema/index.js";
 import {
 	initTelemetry,
 	shutdownTelemetry,
@@ -95,9 +97,10 @@ function checkRuntime(): DoctorCheck[] {
 }
 
 async function checkDatabase(
-	databaseUrl: string | undefined,
+	config: ReturnType<typeof loadConfig>,
 ): Promise<DoctorCheck[]> {
-	if (!databaseUrl) {
+	const connection = getActiveDatabaseConnection(config);
+	if (!connection) {
 		return [
 			{
 				name: "Database connection",
@@ -108,8 +111,13 @@ async function checkDatabase(
 	}
 
 	const checks: DoctorCheck[] = [];
+	checks.push({
+		name: "Active connection",
+		status: "healthy",
+		value: `${connection.name} (${connection.databaseType})`,
+	});
 
-	const result = await testConnection(databaseUrl);
+	const result = await testConnection(connection.databaseUrl);
 
 	if (result.connected) {
 		checks.push({
@@ -132,9 +140,9 @@ async function checkDatabase(
 	}
 
 	// Check schema
-	if (existsSync(LOCAL_SCHEMA_PATH)) {
+	if (schemaCatalogHasConnection(connection.id)) {
 		try {
-			const schema = loadSchema();
+			const { schema } = loadSchemaForConnection(connection);
 			checks.push({
 				name: "Schema",
 				status: "healthy",
@@ -268,12 +276,10 @@ export async function doctorCommand(
 	initTelemetry(config);
 	trackDoctor();
 
-	const databaseUrl = getDatabaseUrl(config);
-
 	const spinner = ora("Running diagnostics...").start();
 
 	const [databaseChecks, llmChecks] = await Promise.all([
-		checkDatabase(databaseUrl),
+		checkDatabase(config),
 		checkLLM(config),
 	]);
 
@@ -305,11 +311,16 @@ export async function doctorCommand(
 				connected: databaseChecks.some(
 					(c) => c.name === "Connected" && c.status === "healthy",
 				),
-				type: config.databaseType,
-				prismaSchemaPath: config.prismaSchemaPath,
-				prismaDatasourceName: config.prismaDatasourceName,
+				activeDatabaseId: config.activeDatabaseId,
+				connections: config.databaseConnections.map((connection) => ({
+					id: connection.id,
+					name: connection.name,
+					type: connection.databaseType,
+					prismaSchemaPath: connection.prismaSchemaPath,
+					prismaDatasourceName: connection.prismaDatasourceName,
+					schemaScanned: schemaCatalogHasConnection(connection.id),
+				})),
 				readonly: true,
-				schemaScanned: existsSync(LOCAL_SCHEMA_PATH),
 			},
 			provider: {
 				name: config.provider,

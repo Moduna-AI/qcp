@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { DatabaseConnectionRegistry } from "./database-connection-registry.js";
 import {
 	createDefaultConfig,
+	getActiveDatabaseConnection,
 	getDatabaseUrl,
 	inferDatabaseType,
 	isDatabaseType,
 	parseQcpConfig,
+	redactConfig,
 } from "./index.js";
 
 describe("database type config", () => {
@@ -12,6 +15,7 @@ describe("database type config", () => {
 		const config = createDefaultConfig();
 
 		expect(config.databaseType).toBe("other-postgres");
+		expect(config.databaseConnections).toEqual([]);
 	});
 
 	test("parses older configs without databaseType", () => {
@@ -29,19 +33,41 @@ describe("database type config", () => {
 		});
 
 		expect(config.databaseType).toBe("other-postgres");
+		expect(config.databaseConnections).toEqual([]);
 		expect(config.prismaSchemaPath).toBeUndefined();
 		expect(config.prismaDatasourceName).toBeUndefined();
 	});
 
-	test("parses Prisma schema configuration", () => {
+	test("migrates legacy database fields into a named connection", () => {
 		const config = parseQcpConfig({
 			databaseType: "prisma-postgres",
+			databaseUrl: "postgres://configured/app",
 			prismaSchemaPath: "prisma/schema.prisma",
 			prismaDatasourceName: "db",
 		});
 
+		expect(config.databaseConnections).toHaveLength(1);
+		expect(config.databaseConnections[0]?.name).toBe("default");
+		expect(config.activeDatabaseId).toBe("default");
+		expect(config.databaseConnections[0]?.databaseType).toBe("prisma-postgres");
+		expect(getActiveDatabaseConnection(config)?.name).toBe("default");
 		expect(config.prismaSchemaPath).toBe("prisma/schema.prisma");
 		expect(config.prismaDatasourceName).toBe("db");
+	});
+
+	test("resolves active connection by alias", () => {
+		const config = parseQcpConfig({
+			databaseConnections: [
+				connectionConfig("prod", "other-postgres", "postgres://prod/app"),
+				connectionConfig("analytics", "neon", "postgres://analytics/app"),
+			],
+			activeDatabaseId: "analytics",
+		});
+
+		expect(getActiveDatabaseConnection(config)?.name).toBe("analytics");
+		expect(getActiveDatabaseConnection(config, "prod")?.databaseUrl).toBe(
+			"postgres://prod/app",
+		);
 	});
 
 	test("validates database type values", () => {
@@ -101,6 +127,67 @@ describe("database type config", () => {
 			restoreEnv("PRISMA_DATABASE_URL", originalPrisma);
 		}
 	});
+
+	test("uses PRISMA_DATABASE_URL when no connection is configured", () => {
+		const originalPrisma = process.env.PRISMA_DATABASE_URL;
+		process.env.PRISMA_DATABASE_URL =
+			"postgres://prisma_user:pass@db.prisma.io/app";
+
+		try {
+			const config = parseQcpConfig({
+				databaseType: "prisma-postgres",
+			});
+
+			expect(getDatabaseUrl(config)).toBe(process.env.PRISMA_DATABASE_URL);
+		} finally {
+			restoreEnv("PRISMA_DATABASE_URL", originalPrisma);
+		}
+	});
+
+	test("redacts all configured database URLs", () => {
+		const config = parseQcpConfig({
+			databaseConnections: [
+				connectionConfig("prod", "other-postgres", "postgres://prod/app"),
+			],
+			activeDatabaseId: "prod",
+		});
+
+		const redacted = redactConfig(config);
+
+		expect(redacted.databaseConnections).toEqual([
+			expect.objectContaining({
+				name: "prod",
+				databaseUrl: "[REDACTED]",
+			}),
+		]);
+	});
+});
+
+describe("database connection registry", () => {
+	test("normalizes aliases and upserts active connections", () => {
+		const config = createDefaultConfig();
+		const registry = new DatabaseConnectionRegistry(config);
+		const snapshot = registry.upsert({
+			name: "Prod",
+			databaseType: "other-postgres",
+			databaseUrl: "postgres://prod/app",
+		});
+
+		expect(snapshot.connections[0]?.name).toBe("prod");
+		expect(snapshot.activeDatabaseId).toBe(snapshot.connections[0]?.id);
+	});
+
+	test("rejects invalid aliases", () => {
+		const registry = new DatabaseConnectionRegistry(createDefaultConfig());
+
+		expect(() =>
+			registry.upsert({
+				name: "bad alias",
+				databaseType: "other-postgres",
+				databaseUrl: "postgres://prod/app",
+			}),
+		).toThrow();
+	});
 });
 
 describe("database type inference", () => {
@@ -141,4 +228,19 @@ function restoreEnv(key: string, value: string | undefined): void {
 	}
 
 	process.env[key] = value;
+}
+
+function connectionConfig(
+	name: string,
+	databaseType: ReturnType<typeof createDefaultConfig>["databaseType"],
+	databaseUrl: string,
+) {
+	return {
+		id: name,
+		name,
+		databaseType,
+		databaseUrl,
+		createdAt: "2026-06-30T00:00:00.000Z",
+		updatedAt: "2026-06-30T00:00:00.000Z",
+	};
 }

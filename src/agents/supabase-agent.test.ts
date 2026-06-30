@@ -190,6 +190,7 @@ function configWithDatabaseType(
 	return {
 		version: "0.1.0",
 		installId: "019a0000-0000-7000-8000-000000000000",
+		databaseConnections: [],
 		databaseType,
 		provider: "gemini",
 		model: "gemini-2.5-flash",

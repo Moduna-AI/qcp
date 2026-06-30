@@ -78,6 +78,7 @@ program
 program
 	.command("connect [database-url]")
 	.description("Connect to a PostgreSQL-compatible database")
+	.option("--name <alias>", "Connection alias, such as prod or staging")
 	.option(
 		"--type <database-type>",
 		"Database type: prisma-postgres, neon, supabase, oracle-postgres, other-postgres",
@@ -89,9 +90,9 @@ program
 		`
 ${chalk.bold("Example:")}
   qcp connect
-  qcp connect postgres://readonly_user:password@host:5432/mydb
-  qcp connect --type neon postgres://readonly_user:password@host/db
-  qcp connect --type prisma-postgres --schema prisma/schema.prisma --datasource db postgres://readonly_user:password@host/db
+  qcp connect --name prod postgres://readonly_user:password@host:5432/mydb
+  qcp connect --name staging --type neon postgres://readonly_user:password@host/db
+  qcp connect --name prod --type prisma-postgres --schema prisma/schema.prisma --datasource db postgres://readonly_user:password@host/db
 
 ${chalk.bold("Tip:")} Create a read-only role for maximum safety:
   CREATE ROLE qcp_readonly;
@@ -103,16 +104,57 @@ ${chalk.bold("Tip:")} Create a read-only role for maximum safety:
 	.action(
 		async (
 			databaseUrl: string | undefined,
-			options: { type?: string; schema?: string; datasource?: string },
+			options: {
+				name?: string;
+				type?: string;
+				schema?: string;
+				datasource?: string;
+			},
 		) => {
 			const { connectCommand } = await import("../commands/connect.js");
 			await connectCommand(databaseUrl, {
+				name: options.name,
 				type: options.type,
 				schema: options.schema,
 				datasource: options.datasource,
 			});
 		},
 	);
+
+// ─── db ───────────────────────────────────────────────────────────────────────
+
+const db = program
+	.command("db")
+	.description("Manage configured database connections");
+
+db.command("list")
+	.description("List configured database connections")
+	.action(async () => {
+		const { dbListCommand } = await import("../commands/db.js");
+		dbListCommand();
+	});
+
+db.command("current")
+	.description("Show the active database connection")
+	.action(async () => {
+		const { dbCurrentCommand } = await import("../commands/db.js");
+		dbCurrentCommand();
+	});
+
+db.command("use <alias>")
+	.description("Set the active database connection")
+	.action(async (alias: string) => {
+		const { dbUseCommand } = await import("../commands/db.js");
+		dbUseCommand(alias);
+	});
+
+db.command("remove <alias>")
+	.description("Remove a database connection and its local schema cache")
+	.option("--yes", "Skip confirmation")
+	.action(async (alias: string, options: { yes?: boolean }) => {
+		const { dbRemoveCommand } = await import("../commands/db.js");
+		await dbRemoveCommand(alias, { yes: options.yes });
+	});
 
 // ─── schema ───────────────────────────────────────────────────────────────────
 
@@ -122,18 +164,24 @@ const schema = program
 
 schema
 	.command("scan")
-	.description("Scan database and build local schema index (.qcp/schema.json)")
-	.action(async () => {
+	.description("Scan database and build local schema index (.qcp/schemas.json)")
+	.option("--database <alias>", "Scan a specific configured database")
+	.action(async (options: { database?: string }) => {
 		const { schemaScanCommand } = await import("../commands/schema.js");
-		await schemaScanCommand();
+		await schemaScanCommand({ database: options.database });
 	});
 
 schema
 	.command("info")
 	.description("Show summary of the indexed schema")
-	.action(async () => {
+	.option(
+		"--database <alias>",
+		"Show schema for a specific configured database",
+	)
+	.option("--all", "Show schema summaries for all indexed databases")
+	.action(async (options: { database?: string; all?: boolean }) => {
 		const { schemaInfoCommand } = await import("../commands/schema.js");
-		schemaInfoCommand();
+		schemaInfoCommand({ database: options.database, all: options.all });
 	});
 
 // ─── ask ──────────────────────────────────────────────────────────────────────

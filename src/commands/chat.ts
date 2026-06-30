@@ -11,7 +11,11 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 import ora from "ora";
 import { QcpSupervisorAgent } from "@/agents/index.js";
-import { getDatabaseUrl, loadConfig } from "@/config/index.js";
+import {
+	getActiveDatabaseConnection,
+	loadConfig,
+	withActiveDatabaseConnection,
+} from "@/config/index.js";
 import { log } from "@/logger/index.js";
 import {
 	printApprovalWarning,
@@ -25,7 +29,7 @@ import {
 	classifyPromptViolation,
 	sanitizeSensitiveData,
 } from "@/safety/index.js";
-import { loadSchema } from "@/schema/index.js";
+import { loadSchemaForConnection } from "@/schema/index.js";
 import {
 	initTelemetry,
 	shutdownTelemetry,
@@ -51,6 +55,7 @@ const CLEAR_COMMANDS = new Set(["/clear", "clear"]);
 const SCHEMA_COMMANDS = new Set(["/schema", "/tables", "tables"]);
 
 interface ChatSession {
+	connectionName: string;
 	schema: DatabaseSchema;
 	supervisor: QcpSupervisorAgent;
 	questionCount: number;
@@ -68,12 +73,13 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 	initTelemetry(config);
 	trackActive();
 
-	const databaseUrl = getDatabaseUrl(config);
-	if (!databaseUrl) {
+	const connection = getActiveDatabaseConnection(config);
+	if (!connection) {
 		printError("No database connection configured.", "Run: qcp connect");
 		await shutdownTelemetry();
 		process.exit(1);
 	}
+	const activeConfig = withActiveDatabaseConnection(config, connection);
 
 	// ── Startup ────────────────────────────────────────────────────────────────
 	printBanner();
@@ -81,9 +87,9 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 	const schemaSpinner = ora("Loading schema...").start();
 	let schema: DatabaseSchema;
 	try {
-		schema = loadSchema();
+		schema = loadSchemaForConnection(connection).schema;
 		schemaSpinner.succeed(
-			`Schema loaded · ${schema.databaseName} · ${schema.tableCount} tables`,
+			`Schema loaded · ${connection.name} · ${schema.databaseName} · ${schema.tableCount} tables`,
 		);
 	} catch (_: unknown) {
 		schemaSpinner.fail("Schema not found. Run: qcp schema scan");
@@ -98,9 +104,9 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 	);
 	console.log(
 		chalk.dim(`  Database: `) +
-			chalk.white(schema.databaseName) +
+			chalk.white(`${connection.name} (${schema.databaseName})`) +
 			chalk.dim(` · Provider: `) +
-			chalk.white(`${config.provider}/${config.model}`),
+			chalk.white(`${activeConfig.provider}/${activeConfig.model}`),
 	);
 	console.log(
 		chalk.dim("  Type your question, or ") +
@@ -112,14 +118,16 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 	console.log();
 
 	const supervisor = new QcpSupervisorAgent({
-		config,
-		databaseUrl,
+		config: activeConfig,
+		connectionName: connection.name,
+		databaseUrl: connection.databaseUrl,
 		schema,
 		approvalHandler: async (reasons, sql) =>
-			confirmChatToolExecution(reasons, sql, config, options),
+			confirmChatToolExecution(reasons, sql, activeConfig, options),
 	});
 
 	const session: ChatSession = {
+		connectionName: connection.name,
 		schema,
 		supervisor,
 		questionCount: 0,
@@ -266,6 +274,7 @@ function _printHelp(): void {
 	const commands = [
 		["/help, ?", "Show this help"],
 		["/schema", "List all tables in the current database"],
+		["qcp db use", "Switch the active database before starting chat"],
 		["/clear", "Clear the screen"],
 		["/exit, quit", "End the session"],
 	];

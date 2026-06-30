@@ -1,8 +1,8 @@
 import chalk from "chalk";
 import ora from "ora";
 import {
-	getDatabaseUrl,
-	LOCAL_SCHEMA_PATH,
+	getActiveDatabaseConnection,
+	LOCAL_SCHEMA_CATALOG_PATH,
 	loadConfig,
 } from "@/config/index.js";
 import { log } from "@/logger/index.js";
@@ -12,31 +12,53 @@ import {
 	printSection,
 	printSuccess,
 } from "@/output/index.js";
-import { loadSchema, saveSchema, scanSchema } from "@/schema/index.js";
+import {
+	listSchemaCatalogEntries,
+	loadSchemaForConnection,
+	saveSchemaForConnection,
+	scanSchema,
+} from "@/schema/index.js";
 import { trackSchemaScan } from "@/telemetry/index.js";
 
-export async function schemaScanCommand(): Promise<void> {
-	const config = loadConfig();
-	const databaseUrl = getDatabaseUrl(config);
+export interface SchemaScanOptions {
+	database?: string;
+}
 
-	if (!databaseUrl) {
-		printError("No database connection configured.", "Run: qcp connect");
+export interface SchemaInfoOptions {
+	database?: string;
+	all?: boolean;
+}
+
+export async function schemaScanCommand(
+	options: SchemaScanOptions = {},
+): Promise<void> {
+	const config = loadConfig();
+	const connection = getActiveDatabaseConnection(config, options.database);
+
+	if (!connection) {
+		printError(
+			options.database
+				? `Database connection not found: ${options.database}`
+				: "No database connection configured.",
+			"Run: qcp connect --name default",
+		);
 		process.exit(1);
 	}
 
-	const spinner = ora("Scanning database schema...").start();
+	const spinner = ora(`Scanning schema for ${connection.name}...`).start();
 
 	try {
-		const schema = await scanSchema(databaseUrl);
+		const schema = await scanSchema(connection.databaseUrl);
 		spinner.succeed(
 			`Scanned ${schema.tableCount} tables from ${schema.databaseName}`,
 		);
 
-		saveSchema(schema);
+		saveSchemaForConnection(connection, schema);
 
 		trackSchemaScan(schema.tableCount);
 
-		printSuccess(`Schema saved to ${LOCAL_SCHEMA_PATH}`);
+		printSuccess(`Schema saved to ${LOCAL_SCHEMA_CATALOG_PATH}`);
+		printInfo(`Database: ${connection.name}`);
 		console.log();
 
 		// Show a preview of discovered tables
@@ -79,12 +101,30 @@ export async function schemaScanCommand(): Promise<void> {
 	}
 }
 
-export function schemaInfoCommand(): void {
+export function schemaInfoCommand(options: SchemaInfoOptions = {}): void {
 	try {
-		const schema = loadSchema();
+		if (options.all) {
+			printAllSchemas();
+			return;
+		}
+
+		const config = loadConfig();
+		const connection = getActiveDatabaseConnection(config, options.database);
+		if (!connection) {
+			printError(
+				options.database
+					? `Database connection not found: ${options.database}`
+					: "No database connection configured.",
+				"Run: qcp connect --name default",
+			);
+			process.exit(1);
+		}
+
+		const { schema } = loadSchemaForConnection(connection);
 		const scannedAt = new Date(schema.scannedAt).toLocaleString();
 
 		printSection("Schema Info");
+		console.log(`  Connection: ${chalk.bold(connection.name)}`);
 		console.log(`  Database: ${chalk.bold(schema.databaseName)}`);
 		console.log(`  Tables:   ${chalk.bold(String(schema.tableCount))}`);
 		console.log(`  Scanned:  ${chalk.dim(scannedAt)}`);
@@ -108,5 +148,23 @@ export function schemaInfoCommand(): void {
 		const message = err instanceof Error ? err.message : String(err);
 		printError(message);
 		process.exit(1);
+	}
+}
+
+function printAllSchemas(): void {
+	const entries = listSchemaCatalogEntries();
+
+	if (entries.length === 0) {
+		printInfo("No schema catalog entries found.");
+		printInfo("Run: qcp schema scan");
+		return;
+	}
+
+	printSection("Schema Catalog");
+	for (const entry of entries) {
+		const scannedAt = new Date(entry.scannedAt).toLocaleString();
+		console.log(
+			`  ${chalk.cyan(entry.connectionName.padEnd(18))} ${chalk.bold(entry.databaseName)} ${chalk.dim(`${entry.schema.tableCount} tables · ${scannedAt}`)}`,
+		);
 	}
 }
