@@ -29,6 +29,17 @@ describe("provider database agent factory", () => {
 			expect(agent.getDatabaseType()).toBe(expectedAgentType);
 		}
 	});
+
+	test("passes Supabase runtime context into the provider agent", () => {
+		const agent = createProviderDatabaseAgent({
+			config: configWithDatabaseType("supabase"),
+			databaseUrl:
+				"postgresql://postgres:secret@db.abcdefghijklmnopqrst.supabase.co:5432/postgres",
+			schema,
+		});
+
+		expect(agent.getTools()).toHaveProperty("qcp_read_supabase_context");
+	});
 });
 
 function configWithDatabaseType(

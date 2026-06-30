@@ -24,7 +24,12 @@ export {
 	createProviderDatabaseAgent,
 	type ProviderDatabaseAgent,
 } from "./provider-factory.js";
-export { SupabaseAgent, type SupabaseAgentConfig } from "./supabase-agent.js";
+export {
+	type CreateSupabaseToolsOptions,
+	createSupabaseTools,
+	SupabaseAgent,
+	type SupabaseAgentConfig,
+} from "./supabase-agent.js";
 export {
 	type ChatAgentResponse,
 	getDirectChatAnswer,

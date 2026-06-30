@@ -72,6 +72,10 @@ export function createProviderDatabaseAgent(
 				description:
 					"Answers questions about Supabase-hosted PostgreSQL databases using qcp read-only database tools.",
 				model,
+				databaseUrl: options.databaseUrl,
+				schema: options.schema,
+				sensitiveTablePatterns: options.config.sensitiveTablePatterns,
+				approvalHandler: options.approvalHandler,
 				tools,
 			});
 		case "oracle-postgres":
