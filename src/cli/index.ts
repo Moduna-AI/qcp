@@ -145,7 +145,7 @@ db.command("use <alias>")
 	.description("Set the active database connection")
 	.action(async (alias: string) => {
 		const { dbUseCommand } = await import("../commands/db.js");
-		dbUseCommand(alias);
+		await dbUseCommand(alias);
 	});
 
 db.command("remove <alias>")

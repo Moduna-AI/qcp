@@ -9,6 +9,11 @@ import {
 } from "@/config/index.js";
 import { createProvider } from "@/llm/index.js";
 import {
+	buildAuditResource,
+	resolveAuditActor,
+	writeAuditEvent,
+} from "@/logger/audit.js";
+import {
 	printBanner,
 	printError,
 	printInfo,
@@ -98,10 +103,18 @@ export async function authCommand(): Promise<void> {
 		if (ok) {
 			spinner.succeed(`Connected to Ollama at ${host}`);
 			printSuccess("Ollama configured — no API key required");
+			await auditAuthEvent(config.installId, "LOGIN_SUCCESS", "success", {
+				provider: "ollama",
+				model,
+			});
 		} else {
 			spinner.warn("Could not reach Ollama");
 			printInfo(`Make sure Ollama is running: ollama serve`);
 			printInfo(`Then pull a model: ollama pull ${model}`);
+			await auditAuthEvent(config.installId, "LOGIN_FAILED", "failure", {
+				provider: "ollama",
+				model,
+			});
 		}
 
 		_printNextSteps();
@@ -136,6 +149,11 @@ export async function authCommand(): Promise<void> {
 		]);
 		if (!overwrite) {
 			printInfo("Keeping existing key.");
+			await auditAuthEvent(config.installId, "CONFIG_CHANGE", "cancelled", {
+				provider,
+				model: config.model,
+				reason: "existing_key_kept",
+			});
 			_printNextSteps();
 			return;
 		}
@@ -187,15 +205,28 @@ export async function authCommand(): Promise<void> {
 		if (ok) {
 			spinner.succeed(`Connected to ${provider} (${model})`);
 			printSuccess(`API key saved and verified for ${provider}`);
+			await auditAuthEvent(config.installId, "LOGIN_SUCCESS", "success", {
+				provider,
+				model,
+			});
 		} else {
 			spinner.warn("Could not verify API key");
 			printInfo("Key saved. Check it at: qcp doctor");
+			await auditAuthEvent(config.installId, "LOGIN_FAILED", "failure", {
+				provider,
+				model,
+			});
 		}
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
 		spinner.fail("Connectivity test failed");
 		printError(message);
 		printInfo("Your key has been saved. Run qcp doctor to diagnose.");
+		await auditAuthEvent(config.installId, "LOGIN_FAILED", "failure", {
+			provider,
+			model,
+			error: message,
+		});
 	}
 
 	_printNextSteps();
@@ -219,11 +250,45 @@ export async function authSetKey(
 	const config = loadConfig();
 	const updatedKeys = { ...config.apiKeys, [provider]: apiKey };
 	saveConfig({ ...config, apiKeys: updatedKeys });
+	await auditAuthEvent(config.installId, "CONFIG_CHANGE", "success", {
+		provider: provider as ProviderName,
+		model: config.model,
+	});
 	printSuccess(`API key saved for ${provider}`);
 
 	if (config.provider !== provider) {
 		printInfo(`Switch to this provider: qcp model set ${provider}`);
 	}
+}
+
+async function auditAuthEvent(
+	installId: string,
+	action: "LOGIN_SUCCESS" | "LOGIN_FAILED" | "CONFIG_CHANGE",
+	outcome: "success" | "failure" | "cancelled",
+	resource: {
+		readonly provider: ProviderName;
+		readonly model: string;
+		readonly reason?: string;
+		readonly error?: string;
+	},
+): Promise<void> {
+	await writeAuditEvent({
+		scope: "auth",
+		action,
+		actor: resolveAuditActor(installId),
+		resource: buildAuditResource({
+			command: "auth",
+			installId,
+			provider: resource.provider,
+			model: resource.model,
+		}),
+		delta: null,
+		outcome,
+		metadata: {
+			reason: resource.reason ?? null,
+			error: resource.error ?? null,
+		},
+	});
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

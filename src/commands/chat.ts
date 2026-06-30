@@ -10,6 +10,7 @@ import * as readline from "node:readline/promises";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import ora from "ora";
+import { v7 as uuidv7 } from "uuid";
 import { QcpSupervisorAgent } from "@/agents/index.js";
 import {
 	getActiveDatabaseConnection,
@@ -117,8 +118,12 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 	);
 	console.log();
 
+	const sessionId = uuidv7();
 	const supervisor = new QcpSupervisorAgent({
 		config: activeConfig,
+		command: "chat",
+		sessionId,
+		connectionId: connection.id,
 		connectionName: connection.name,
 		databaseUrl: connection.databaseUrl,
 		schema,

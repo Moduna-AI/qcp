@@ -1,5 +1,6 @@
 import type { Agent } from "@mastra/core/agent";
 import { Agent as MastraAgent } from "@mastra/core/agent";
+import type { AuditContext } from "@/logger/audit.js";
 import { sanitizeSensitiveData } from "@/safety/index.js";
 import type { DatabaseSchema, QcpConfig } from "@/types/index.js";
 import type { AbstractDatabaseAgent } from "./database-agent.js";
@@ -12,6 +13,9 @@ import {
 
 export interface QcpSupervisorAgentOptions {
 	readonly config: QcpConfig;
+	readonly command?: string;
+	readonly sessionId?: string;
+	readonly connectionId?: string;
 	readonly connectionName?: string;
 	readonly databaseUrl: string;
 	readonly schema: DatabaseSchema;
@@ -45,6 +49,7 @@ export class QcpSupervisorAgent {
 				databaseUrl: options.databaseUrl,
 				schema: options.schema,
 				approvalHandler: options.approvalHandler,
+				auditContext: buildSupervisorAuditContext(options),
 			});
 		this.agent = new MastraAgent({
 			id: "qcp-supervisor-agent",
@@ -124,6 +129,22 @@ export class QcpSupervisorAgent {
 			"To work with another configured database, tell the user to run qcp db use <alias> before starting ask or chat.",
 		].join("\n\n");
 	}
+}
+
+function buildSupervisorAuditContext(
+	options: QcpSupervisorAgentOptions,
+): AuditContext {
+	return {
+		command: options.command,
+		sessionId: options.sessionId,
+		installId: options.config.installId,
+		connectionId: options.connectionId,
+		connectionName: options.connectionName,
+		databaseType: options.config.databaseType,
+		databaseName: options.schema.databaseName,
+		provider: options.config.provider,
+		model: options.config.model,
+	};
 }
 
 export function getDirectChatAnswer(

@@ -5,6 +5,11 @@ import {
 	LOCAL_SCHEMA_CATALOG_PATH,
 	loadConfig,
 } from "@/config/index.js";
+import {
+	buildAuditResource,
+	resolveAuditActor,
+	writeAuditEvent,
+} from "@/logger/audit.js";
 import { log } from "@/logger/index.js";
 import {
 	printError,
@@ -92,10 +97,50 @@ export async function schemaScanCommand(
 			tables: schema.tableCount,
 			db: schema.databaseName,
 		});
+		await writeAuditEvent({
+			scope: "schema_change",
+			action: "SCHEMA_SCAN",
+			actor: resolveAuditActor(config.installId),
+			resource: buildAuditResource({
+				command: "schema scan",
+				installId: config.installId,
+				connectionId: connection.id,
+				connectionName: connection.name,
+				databaseType: connection.databaseType,
+				databaseName: schema.databaseName,
+				provider: config.provider,
+				model: config.model,
+			}),
+			delta: null,
+			outcome: "success",
+			metadata: {
+				tableCount: schema.tableCount,
+				catalogPath: LOCAL_SCHEMA_CATALOG_PATH,
+			},
+		});
 	} catch (err: unknown) {
 		spinner.fail("Schema scan failed");
 		const message = err instanceof Error ? err.message : String(err);
 		printError(message);
+		await writeAuditEvent({
+			scope: "schema_change",
+			action: "SCHEMA_SCAN",
+			actor: resolveAuditActor(config.installId),
+			resource: buildAuditResource({
+				command: "schema scan",
+				installId: config.installId,
+				connectionId: connection.id,
+				connectionName: connection.name,
+				databaseType: connection.databaseType,
+				provider: config.provider,
+				model: config.model,
+			}),
+			delta: null,
+			outcome: "failure",
+			metadata: {
+				error: message,
+			},
+		});
 		log("error", "Schema scan failed", { error: message });
 		process.exit(1);
 	}
