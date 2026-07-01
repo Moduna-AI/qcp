@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { arch, version as nodeVersion, platform, release } from "node:os";
 import { join } from "node:path";
-import { ZipArchive } from "archiver";
 import chalk from "chalk";
 import ora from "ora";
 import {
@@ -19,6 +18,8 @@ import {
 	printInfo,
 	printSection,
 } from "@/output/index.js";
+import { importPackageFromStore } from "@/packages/lazy-packages.js";
+import { ensurePackageGroups } from "@/packages/runtime.js";
 import {
 	loadSchemaForConnection,
 	schemaCatalogHasConnection,
@@ -195,7 +196,7 @@ async function checkLLM(
 
 	if (hasKey) {
 		try {
-			const provider = createProvider(config);
+			const provider = await createProvider(config);
 			const connected = await Promise.race([
 				provider.testConnectivity(),
 				new Promise<boolean>((resolve) =>
@@ -378,6 +379,10 @@ export async function doctorCommand(
 
 	// ── Bundle mode ──────────────────────────────────────────────────────────
 	if (options.bundle) {
+		await ensurePackageGroups({
+			commandName: "qcp doctor --bundle",
+			groups: ["doctor-bundle"],
+		});
 		await generateSupportBundle(report, config);
 	}
 
@@ -427,7 +432,9 @@ async function generateSupportBundle(
 		const { createWriteStream } = await import("node:fs");
 		const zipPath = "qcp-support.zip";
 		const output = createWriteStream(zipPath);
-		const archive = new ZipArchive({
+		const { default: createArchive } =
+			await importPackageFromStore<ArchiverModule>("archiver");
+		const archive = createArchive("zip", {
 			zlib: { level: 9 }, // Sets the compression level.
 		});
 
@@ -452,4 +459,18 @@ async function generateSupportBundle(
 		const message = err instanceof Error ? err.message : String(err);
 		printError(message);
 	}
+}
+
+interface ArchiverModule {
+	readonly default: (
+		format: "zip",
+		options: { readonly zlib: { readonly level: number } },
+	) => ArchiverInstance;
+}
+
+interface ArchiverInstance {
+	pipe(output: NodeJS.WritableStream): void;
+	directory(source: string, destination: false): void;
+	finalize(): void;
+	on(event: "error", listener: (error: Error) => void): void;
 }

@@ -20,6 +20,8 @@ import {
 	printSection,
 	printSuccess,
 } from "@/output/index.js";
+import { providerPackageGroup } from "@/packages/lazy-packages.js";
+import { ensurePackageGroups } from "@/packages/runtime.js";
 import { trackProviderSelected } from "@/telemetry/index.js";
 import type { ProviderName } from "@/types/index.js";
 
@@ -97,7 +99,7 @@ export async function authCommand(): Promise<void> {
 			model,
 			ollamaHost: host,
 		};
-		const testProvider = createProvider(testConfig);
+		const testProvider = await createProvider(testConfig);
 		const ok = await testProvider.testConnectivity();
 
 		if (ok) {
@@ -194,9 +196,13 @@ export async function authCommand(): Promise<void> {
 	const spinner = ora(`Testing ${provider} connectivity...`).start();
 
 	const testConfig = { ...config, provider, model, apiKeys: updatedKeys };
-	const testProvider = createProvider(testConfig);
 
 	try {
+		await ensurePackageGroups({
+			commandName: "qcp auth",
+			groups: [providerPackageGroup(provider)],
+		});
+		const testProvider = await createProvider(testConfig);
 		const ok = await Promise.race([
 			testProvider.testConnectivity(),
 			new Promise<boolean>((res) => setTimeout(() => res(false), 10_000)),

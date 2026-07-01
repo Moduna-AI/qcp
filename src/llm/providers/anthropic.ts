@@ -1,10 +1,11 @@
-import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk";
 import {
 	buildSqlPrompt,
 	buildSummaryPrompt,
 	extractSqlAndExplanation,
 	SQL_SYSTEM_PROMPT,
 } from "@/llm/prompts.js";
+import { importPackageFromStore } from "@/packages/lazy-packages.js";
 import type {
 	DatabaseSchema,
 	LLMProvider,
@@ -13,13 +14,26 @@ import type {
 	SummaryResult,
 } from "@/types/index.js";
 
+interface AnthropicModule {
+	readonly default: new (options: { readonly apiKey: string }) => Anthropic;
+}
+
 export class AnthropicProvider implements LLMProvider {
 	readonly providerName = "anthropic" as const;
 	readonly modelName: string;
 	private client: Anthropic;
 
-	constructor(apiKey: string, model = "claude-opus-4-5") {
-		this.client = new Anthropic({ apiKey });
+	public static async create(
+		apiKey: string,
+		model = "claude-opus-4-5",
+	): Promise<AnthropicProvider> {
+		const module =
+			await importPackageFromStore<AnthropicModule>("@anthropic-ai/sdk");
+		return new AnthropicProvider(new module.default({ apiKey }), model);
+	}
+
+	constructor(client: Anthropic, model = "claude-opus-4-5") {
+		this.client = client;
 		this.modelName = model;
 	}
 

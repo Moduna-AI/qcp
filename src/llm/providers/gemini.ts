@@ -1,10 +1,11 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import type { GoogleGenerativeAI } from "@google/generative-ai";
 import {
 	buildSqlPrompt,
 	buildSummaryPrompt,
 	extractSqlAndExplanation,
 	SQL_SYSTEM_PROMPT,
 } from "@/llm/prompts.js";
+import { importPackageFromStore } from "@/packages/lazy-packages.js";
 import type {
 	DatabaseSchema,
 	LLMProvider,
@@ -13,13 +14,27 @@ import type {
 	SummaryResult,
 } from "@/types/index.js";
 
+interface GeminiModule {
+	readonly GoogleGenerativeAI: new (apiKey: string) => GoogleGenerativeAI;
+}
+
 export class GeminiProvider implements LLMProvider {
 	readonly providerName = "gemini" as const;
 	readonly modelName: string;
 	private client: GoogleGenerativeAI;
 
-	constructor(apiKey: string, model = "gemini-2.5-flash") {
-		this.client = new GoogleGenerativeAI(apiKey);
+	public static async create(
+		apiKey: string,
+		model = "gemini-2.5-flash",
+	): Promise<GeminiProvider> {
+		const module = await importPackageFromStore<GeminiModule>(
+			"@google/generative-ai",
+		);
+		return new GeminiProvider(new module.GoogleGenerativeAI(apiKey), model);
+	}
+
+	constructor(client: GoogleGenerativeAI, model = "gemini-2.5-flash") {
+		this.client = client;
 		this.modelName = model;
 	}
 

@@ -10,7 +10,7 @@ const schema: DatabaseSchema = {
 };
 
 describe("provider database agent factory", () => {
-	test("selects the concrete provider agent for each configured database type", () => {
+	test("selects the concrete provider agent for each configured database type", async () => {
 		const cases = [
 			["prisma-postgres", "prisma"],
 			["neon", "neon"],
@@ -20,7 +20,7 @@ describe("provider database agent factory", () => {
 		] as const;
 
 		for (const [databaseType, expectedAgentType] of cases) {
-			const agent = createProviderDatabaseAgent({
+			const agent = await createProviderDatabaseAgent({
 				config: configWithDatabaseType(databaseType),
 				databaseUrl: "postgres://example",
 				schema,
@@ -30,8 +30,8 @@ describe("provider database agent factory", () => {
 		}
 	});
 
-	test("passes Supabase runtime context into the provider agent", () => {
-		const agent = createProviderDatabaseAgent({
+	test("passes Supabase runtime context into the provider agent", async () => {
+		const agent = await createProviderDatabaseAgent({
 			config: configWithDatabaseType("supabase"),
 			databaseUrl:
 				"postgresql://postgres:secret@db.abcdefghijklmnopqrst.supabase.co:5432/postgres",

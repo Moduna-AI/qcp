@@ -9,7 +9,8 @@
  */
 
 import { arch, platform } from "node:os";
-import { PostHog } from "posthog-node";
+import type { PostHog } from "posthog-node";
+import { importPackageFromStore } from "@/packages/lazy-packages.js";
 import type { ProviderName, QcpConfig } from "@/types/index.js";
 import { QCP_VERSION } from "@/version.js";
 
@@ -29,14 +30,7 @@ export function initTelemetry(
 
 	if (!config.telemetry) return;
 
-	_client = new PostHog(POSTHOG_KEY, {
-		host: POSTHOG_HOST,
-		flushAt: 10,
-		flushInterval: 3000,
-	});
-
-	// Disable PostHog's own exception capturing to keep things clean
-	_client.on("error", () => {});
+	void initTelemetryClient();
 }
 
 export async function shutdownTelemetry(): Promise<void> {
@@ -124,4 +118,32 @@ export function trackDoctor(): void {
 
 export function trackError(command: string, errorType: string): void {
 	capture("qcp_error", { command, error_type: errorType });
+}
+
+async function initTelemetryClient(): Promise<void> {
+	if (!_config?.telemetry || _client) return;
+
+	try {
+		const { PostHog } =
+			await importPackageFromStore<PostHogModule>("posthog-node");
+		_client = new PostHog(POSTHOG_KEY, {
+			host: POSTHOG_HOST,
+			flushAt: 10,
+			flushInterval: 3000,
+		});
+		_client.on("error", () => {});
+	} catch {
+		_client = null;
+	}
+}
+
+interface PostHogModule {
+	readonly PostHog: new (
+		apiKey: string,
+		options: {
+			readonly host: string;
+			readonly flushAt: number;
+			readonly flushInterval: number;
+		},
+	) => PostHog;
 }

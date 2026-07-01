@@ -349,6 +349,46 @@ configCmd
 		configSetKeyCommand(provider, apiKey);
 	});
 
+// ─── packages ─────────────────────────────────────────────────────────────────
+
+const packages = program
+	.command("packages")
+	.description("Manage lazily installed qcp runtime packages");
+
+packages
+	.command("list")
+	.description("List qcp runtime package groups")
+	.action(async () => {
+		const { packagesListCommand } = await import("../commands/packages.js");
+		packagesListCommand();
+	});
+
+packages
+	.command("install <group>")
+	.description("Install a qcp runtime package group, or all")
+	.option("--yes", "Skip confirmation checks for non-interactive installs")
+	.option("--verbose", "Show the underlying Bun command and install output")
+	.addHelpText(
+		"after",
+		`
+${chalk.bold("Examples:")}
+  qcp packages install agent
+  qcp packages install provider-openai --yes
+  qcp packages install all --yes
+`,
+	)
+	.action(
+		async (group: string, options: { yes?: boolean; verbose?: boolean }) => {
+			const { packagesInstallCommand } = await import(
+				"../commands/packages.js"
+			);
+			await packagesInstallCommand(group, {
+				yes: options.yes,
+				verbose: options.verbose,
+			});
+		},
+	);
+
 // ─── telemetry ────────────────────────────────────────────────────────────────
 
 const telemetry = program

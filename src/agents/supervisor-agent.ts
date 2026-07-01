@@ -38,19 +38,31 @@ export class QcpSupervisorAgent {
 	private readonly databaseAgent: ProviderDatabaseAgent;
 	private readonly agent: Agent<"qcp-supervisor-agent">;
 
-	public constructor(options: QcpSupervisorAgentOptions) {
-		this.config = options.config;
-		this.connectionName = options.connectionName ?? "default";
-		this.schema = options.schema;
-		this.databaseAgent =
+	public static async create(
+		options: QcpSupervisorAgentOptions,
+	): Promise<QcpSupervisorAgent> {
+		const databaseAgent =
 			options.databaseAgent ??
-			createProviderDatabaseAgent({
+			(await createProviderDatabaseAgent({
 				config: options.config,
 				databaseUrl: options.databaseUrl,
 				schema: options.schema,
 				approvalHandler: options.approvalHandler,
 				auditContext: buildSupervisorAuditContext(options),
-			});
+			}));
+		return new QcpSupervisorAgent({ ...options, databaseAgent });
+	}
+
+	public constructor(options: QcpSupervisorAgentOptions) {
+		this.config = options.config;
+		this.connectionName = options.connectionName ?? "default";
+		this.schema = options.schema;
+		if (!options.databaseAgent) {
+			throw new Error(
+				"QcpSupervisorAgent.create must be used without a databaseAgent",
+			);
+		}
+		this.databaseAgent = options.databaseAgent;
 		this.agent = new MastraAgent({
 			id: "qcp-supervisor-agent",
 			name: "QCP Supervisor Agent",
