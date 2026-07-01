@@ -127,8 +127,23 @@ qcp chat
 | `qcp schema scan` | Index the database schema locally |
 | `qcp ask "<question>"` | Query your database in plain English |
 | `qcp chat` | Start interactive multi-question session |
+| `qcp automation "<query>"` | Draft a durable cloud automation for review |
 | `qcp explain "<question>"` | Generate SQL without executing it |
 | `qcp doctor` | Run system diagnostics |
+
+### Automation
+
+```bash
+qcp automation "Create a daily read-only revenue summary"
+qcp automation status req_123    # Review trigger, action, env refs, and validation issues
+qcp automation approve req_123   # Activate only after reviewing the setup
+qcp automation list              # List active and draft automations
+qcp automation run aut_123       # Manually trigger an active automation
+qcp automation delete aut_123    # Soft-delete an automation
+qcp automation test              # Submit, review, approve, run, list, and delete a heartbeat workflow
+```
+
+Automation is a cloud flow. The CLI sends typed requests to `QCP_AUTOMATION_CONTROL_URL`; the deployed automation agent generates the draft, writes registry state, and executes durable Inngest functions. Natural-language requests never activate directly. Review and approval are required before a generated spec becomes active.
 
 ### Model Management
 
@@ -342,6 +357,17 @@ GEMINI_API_KEY=AIza...            # Gemini API key
 OPENAI_API_KEY=sk-...             # OpenAI API key
 ANTHROPIC_API_KEY=sk-ant-...      # Anthropic API key
 OLLAMA_HOST=http://localhost:11434 # Ollama server URL
+
+# Cloud automation
+QCP_AUTOMATION_CONTROL_URL=https://automation.example.com
+QCP_AUTOMATION_CONTROL_TOKEN=...   # Optional bearer token
+INNGEST_EVENT_KEY=...
+INNGEST_SIGNING_KEY=...
+QCP_AUTOMATION_INNGEST_APP_ID=qcp-automation
+QCP_AUTOMATION_DATABASE_URL=postgres://...
+QCP_AUTOMATION_CODEX_MODEL=...     # Production Codex SDK model override
+QCP_AUTOMATION_QCP_PROVIDER=openai # Provider for qcp.ask.readonly executions
+QCP_AUTOMATION_QCP_MODEL=...       # Optional execution model override
 ```
 
 ---

@@ -28,6 +28,7 @@ ${chalk.bold("Quick start:")}
   ${chalk.cyan("qcp schema scan")}                Index your database schema
   ${chalk.cyan("qcp ask")} ${chalk.dim('"Your question"')}       Query in plain English
   ${chalk.cyan("qcp chat")}                       Start interactive assistant mode
+  ${chalk.cyan("qcp automation")} ${chalk.dim('"Create..."')}   Draft a cloud automation
 
 ${chalk.bold("Docs & source:")}
   ${QCP_REPO}
@@ -250,6 +251,91 @@ ${chalk.bold("Examples:")}
 	.action(async (options: { yes?: boolean }) => {
 		const { chatCommand } = await import("../commands/chat.js");
 		await chatCommand({ noConfirm: options.yes });
+	});
+
+// ─── automation ──────────────────────────────────────────────────────────────
+
+const automation = program
+	.command("automation")
+	.description("Create and manage durable cloud automations")
+	.argument("[query...]", "Automation request to draft")
+	.option("--test-mode", "Use automation test-mode generation")
+	.addHelpText(
+		"after",
+		`
+${chalk.bold("Examples:")}
+  qcp automation "Create a daily read-only revenue summary"
+  qcp automation status req_123
+  qcp automation approve req_123
+  qcp automation list
+  qcp automation run aut_123
+  qcp automation delete aut_123 --yes
+  qcp automation test
+`,
+	)
+	.action(
+		async (
+			queryParts: string[] | undefined,
+			options: { testMode?: boolean },
+		) => {
+			const { automationCommand } = await import("../commands/automation.js");
+			await automationCommand(queryParts, { testMode: options.testMode });
+		},
+	);
+
+automation
+	.command("status <request-id>")
+	.description("Show draft generation state and setup review")
+	.action(async (requestId: string) => {
+		const { automationStatusCommand } = await import(
+			"../commands/automation.js"
+		);
+		await automationStatusCommand(requestId);
+	});
+
+automation
+	.command("approve <request-id>")
+	.description("Approve and activate a reviewed automation")
+	.action(async (requestId: string) => {
+		const { automationApproveCommand } = await import(
+			"../commands/automation.js"
+		);
+		await automationApproveCommand(requestId);
+	});
+
+automation
+	.command("list")
+	.description("List active and draft automations")
+	.action(async () => {
+		const { automationListCommand } = await import("../commands/automation.js");
+		await automationListCommand();
+	});
+
+automation
+	.command("delete <automation-id>")
+	.description("Soft-delete an automation")
+	.option("--yes", "Skip confirmation")
+	.action(async (automationId: string, options: { yes?: boolean }) => {
+		const { automationDeleteCommand } = await import(
+			"../commands/automation.js"
+		);
+		await automationDeleteCommand(automationId, { yes: options.yes });
+	});
+
+automation
+	.command("run <automation-id>")
+	.description("Manually run an active automation")
+	.action(async (automationId: string) => {
+		const { automationRunCommand } = await import("../commands/automation.js");
+		await automationRunCommand(automationId);
+	});
+
+automation
+	.command("test")
+	.description("Run heartbeat automation E2E against the control service")
+	.action(async () => {
+		const { automationTestCommand } = await import("../commands/automation.js");
+		await automationTestCommand();
 	});
 
 // ─── explain ─────────────────────────────────────────────────────────────────
