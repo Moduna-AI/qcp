@@ -1,0 +1,20 @@
+[package]
+name = "qcp-desktop"
+version = "0.1.5-alpha.0"
+description = "Desktop prompt shell for qcp"
+authors = ["Moduna AI"]
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "qcp_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+time = "=0.3.51"

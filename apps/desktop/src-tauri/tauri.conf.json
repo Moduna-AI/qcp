@@ -1,0 +1,38 @@
+{
+	"$schema": "https://schema.tauri.app/config/2",
+	"productName": "qcp",
+	"version": "0.1.4-beta",
+	"identifier": "ai.moduna.qcp.desktop",
+	"build": {
+		"beforeDevCommand": "bun run dev",
+		"beforeBundleCommand": "bun run ../../scripts/build-desktop-sidecar.ts",
+		"devUrl": "http://127.0.0.1:5173",
+		"beforeBuildCommand": "bun run build",
+		"frontendDist": "../dist"
+	},
+	"app": {
+		"withGlobalTauri": false,
+		"windows": [
+			{
+				"label": "main",
+				"title": "qcp",
+				"width": 1280,
+				"height": 860,
+				"minWidth": 960,
+				"minHeight": 680,
+				"center": true,
+				"resizable": true,
+				"decorations": true
+			}
+		],
+		"security": {
+			"csp": null
+		}
+	},
+	"bundle": {
+		"active": true,
+		"targets": "all",
+		"category": "DeveloperTool",
+		"externalBin": ["binaries/qcp-assistant"]
+	}
+}

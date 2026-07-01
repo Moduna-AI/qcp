@@ -1,5 +1,9 @@
 # Build output
 dist/
+apps/desktop/dist/
+apps/desktop/src-tauri/binaries/
+apps/desktop/src-tauri/target/
+apps/desktop/design-qa-*.png
 
 # Dependencies
 node_modules/

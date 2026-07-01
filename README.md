@@ -115,6 +115,29 @@ qcp chat
 
 ---
 
+## Desktop App
+
+qcp also includes a Tauri desktop interface for the same local supervisor and read-only database tools used by the CLI.
+
+```bash
+bun run desktop:dev        # Open the desktop app in development
+bun run desktop:sidecar    # Build the packaged assistant sidecar for this platform
+bun run desktop:build      # Build the desktop app and unsigned local bundle
+```
+
+The desktop app expects the same local setup as the CLI:
+
+```bash
+qcp connect
+qcp schema scan
+```
+
+Release builds package a `qcp-assistant` sidecar with Tauri `externalBin`, so the app does not depend on `bun run` at runtime. During local development, the Tauri bridge falls back to `bun run src/desktop/assistant-runner.ts` when no packaged sidecar is present.
+
+Build artifacts are written under `apps/desktop/src-tauri/target/`; generated sidecar binaries live under `apps/desktop/src-tauri/binaries/` and are ignored by git.
+
+---
+
 ## Commands
 
 ### Core
