@@ -1,4 +1,12 @@
 export {
+	type AutomationDraftResult,
+	type AutomationIntent,
+	type AutomationSpecGenerator,
+	CodexAutomationSpecGenerator,
+	DEFAULT_AUTOMATION_TEST_MODEL,
+	QcpAutomationAgent,
+} from "./automation-agent.js";
+export {
 	AbstractDatabaseAgent,
 	type DatabaseAgentConfig,
 	type DatabaseAgentType,

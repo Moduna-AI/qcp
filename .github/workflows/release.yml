@@ -95,7 +95,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: ${{ github.repository }}
-          token: ${{ secrets.GITHUB_TOKEN }} 
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }} 
           path: 'tap-repo'
 
       - name: Compute Checksums and Update Remote Tap Formula
@@ -105,6 +105,7 @@ jobs:
           git fetch --all
           BRANCH=$(git branch -r --contains "$GITHUB_SHA" \
             | grep -v HEAD \
+
             | sed 's|.*origin/||' \
             | xargs \
             | awk '{print $1}')
@@ -115,7 +116,11 @@ jobs:
           fi
           echo "Resolved source branch: $BRANCH"
 
-          # 2. Compute checksums
+          # 2. Extract clean version string from the triggered Git tag
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Processing automated release version: $TAG_VERSION"
+
+          # 3. Compute artifact binary checksums
           cd dist
           sha256sum qcp-* > checksums.txt
           cat checksums.txt
@@ -125,38 +130,44 @@ jobs:
           SHA_LINUX_ARM64=$(sha256sum qcp-linux-arm64 | awk '{print $1}')
           cd ..
 
-          # 3. Prepare tap-repo, checkout the detected branch
+          # 4. Prepare tap-repo (moduna-ai/homebrew-qcp), check out target branch
           cd tap-repo
           git config --global user.name "github-actions[bot]"
+          # Correct account string enforces verified auto-signing on remote repository rules
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git fetch origin "$BRANCH"
           git checkout "$BRANCH"
           cd ..
 
-          # 4. Update the formula
+          # 5. Update the Ruby Formula file properties
           FORMULA_PATH="tap-repo/Formula/qcp.rb"
 
           if [ -f "$FORMULA_PATH" ]; then
+            # Dynamically update the version block
+            sed -i "s/version \".*\"/version \"${TAG_VERSION}\"/" $FORMULA_PATH
+
+            # Dynamically update the system platform checksum lines
             sed -i "/qcp-macos-arm64/{n;s/sha256 \".*\"/sha256 \"${SHA_MAC_ARM64}\"/}" $FORMULA_PATH
             sed -i "/qcp-linux-x64/{n;s/sha256 \".*\"/sha256 \"${SHA_LINUX_X64}\"/}" $FORMULA_PATH
             sed -i "/qcp-linux-arm64/{n;s/sha256 \".*\"/sha256 \"${SHA_LINUX_ARM64}\"/}" $FORMULA_PATH
 
-            # 5. Commit and push to the same branch
+            # 6. Safely stage, verify changes, and push updates
             cd tap-repo
             git add Formula/qcp.rb
 
             if ! git diff --cached --quiet; then
-              git commit -m "chore: update qcp formula checksums for ${GITHUB_REF#refs/tags/}"
+              git commit -m "chore: update qcp formula to v${TAG_VERSION} and sync checksums"
               git push origin "$BRANCH"
             else
-              echo "Formula checksums are already identical. Skipping commit."
+              echo "Formula is already identical to remote specs. Skipping commit."
             fi
             cd ..
           else
-            echo "Error: Formula file not found at $FORMULA_PATH!"
+            echo "Error: Formula file tracking path not found at $FORMULA_PATH!"
             exit 1
           fi
+
 
       - name: Extract version
         id: version
