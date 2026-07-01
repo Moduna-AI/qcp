@@ -22,7 +22,7 @@ class Qcp < Formula
   on_macos do
     on_arm do
       url "https://github.com/Moduna-AI/qcp/releases/download/v#{version}/qcp-macos-arm64"
-      sha256 "2e0c7332521b6be0d9191558a9caf669e77bbe2277e690be91c8249a115d8499"
+      sha256 "eca49776a1ed23092ab08dc68057d00d513904e5c22ae1b2b35a0898bc40b2f8"
     end
 
   end
@@ -30,12 +30,12 @@ class Qcp < Formula
   on_linux do
     on_intel do
       url "https://github.com/Moduna-AI/qcp/releases/download/v#{version}/qcp-linux-x64"
-      sha256 "500d690632541ae0000217344123894a1a296c7f31291c7c58194664d72bfbc4"
+      sha256 "c79e748929862dc670af03b9bc02168a50409762d869b00a215ea3aa5136613b"
     end
 
     on_arm do
       url "https://github.com/Moduna-AI/qcp/releases/download/v#{version}/qcp-linux-arm64"
-      sha256 "f26258f1e9f216fd67228b8b79cec8eb16cc58a59b416958a9be51d260ed1fee"
+      sha256 "596255f6867f54741ccfcc97c44a62df157d5871dc1a4b9650c1b72f92b971f3"
     end
   end
 
@@ -73,17 +73,20 @@ class Qcp < Formula
       Get started with qcp:
 
         qcp init
-        qcp connect postgres://user:pass@host/db
+        qcp auth
+        qcp connect
         qcp schema scan
         qcp ask "What are our top customers?"
 
-      Set your Gemini API key (default provider):
+      qcp auth walks you through provider setup, including Gemini, OpenAI,
+      Anthropic, or local Ollama. For non-interactive setup:
+
         qcp config set-key gemini YOUR_API_KEY
 
-      Or switch to a different provider:
-        qcp model set openai     # requires OPENAI_API_KEY
-        qcp model set anthropic  # requires ANTHROPIC_API_KEY
-        qcp model set ollama     # local, no API key needed
+      qcp connect walks you through database type selection and connection URL
+      entry. For scripts or CI:
+
+        qcp connect --type neon postgres://readonly_user:password@host/db
 
       Documentation: https://github.com/Moduna-AI/qcp
     EOS

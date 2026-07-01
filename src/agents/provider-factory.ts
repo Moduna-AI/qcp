@@ -1,4 +1,5 @@
 import type { ToolsInput } from "@mastra/core/agent";
+import type { AuditContext } from "@/logger/audit.js";
 import type { DatabaseSchema, QcpConfig } from "@/types/index.js";
 import type { AbstractDatabaseAgent } from "./database-agent.js";
 import {
@@ -17,6 +18,7 @@ export interface CreateProviderDatabaseAgentOptions {
 	readonly databaseUrl: string;
 	readonly schema: DatabaseSchema;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
+	readonly auditContext?: AuditContext;
 	readonly tools?: ToolsInput;
 }
 
@@ -37,6 +39,7 @@ export function createProviderDatabaseAgent(
 			schema: options.schema,
 			sensitiveTablePatterns: options.config.sensitiveTablePatterns,
 			approvalHandler: options.approvalHandler,
+			auditContext: options.auditContext,
 		}),
 		...(options.tools ?? {}),
 	};
@@ -51,7 +54,10 @@ export function createProviderDatabaseAgent(
 				model,
 				databaseUrl: options.databaseUrl,
 				schema: options.schema,
+				prismaSchemaPath: options.config.prismaSchemaPath,
+				datasourceName: options.config.prismaDatasourceName,
 				sensitiveTablePatterns: options.config.sensitiveTablePatterns,
+				auditContext: options.auditContext,
 				tools,
 			});
 		case "neon":
@@ -70,6 +76,11 @@ export function createProviderDatabaseAgent(
 				description:
 					"Answers questions about Supabase-hosted PostgreSQL databases using qcp read-only database tools.",
 				model,
+				databaseUrl: options.databaseUrl,
+				schema: options.schema,
+				sensitiveTablePatterns: options.config.sensitiveTablePatterns,
+				approvalHandler: options.approvalHandler,
+				auditContext: options.auditContext,
 				tools,
 			});
 		case "oracle-postgres":

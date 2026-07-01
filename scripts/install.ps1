@@ -137,7 +137,8 @@ Write-Host ""
 Write-Host "  Get started:" -ForegroundColor White
 Write-Host ""
 Write-Host "    qcp init" -ForegroundColor DarkGray
-Write-Host "    qcp connect postgres://user:pass@host/db" -ForegroundColor DarkGray
+Write-Host "    qcp auth" -ForegroundColor DarkGray
+Write-Host "    qcp connect" -ForegroundColor DarkGray
 Write-Host "    qcp schema scan" -ForegroundColor DarkGray
 Write-Host "    qcp ask `"What were our top customers?`"" -ForegroundColor DarkGray
 Write-Host ""

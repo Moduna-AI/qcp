@@ -29,6 +29,17 @@ describe("provider database agent factory", () => {
 			expect(agent.getDatabaseType()).toBe(expectedAgentType);
 		}
 	});
+
+	test("passes Supabase runtime context into the provider agent", () => {
+		const agent = createProviderDatabaseAgent({
+			config: configWithDatabaseType("supabase"),
+			databaseUrl:
+				"postgresql://postgres:secret@db.abcdefghijklmnopqrst.supabase.co:5432/postgres",
+			schema,
+		});
+
+		expect(agent.getTools()).toHaveProperty("qcp_read_supabase_context");
+	});
 });
 
 function configWithDatabaseType(
@@ -37,6 +48,7 @@ function configWithDatabaseType(
 	return {
 		version: "0.1.0",
 		installId: "019a0000-0000-7000-8000-000000000000",
+		databaseConnections: [],
 		databaseType,
 		provider: "gemini",
 		model: "gemini-2.5-flash",

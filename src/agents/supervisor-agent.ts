@@ -1,5 +1,6 @@
 import type { Agent } from "@mastra/core/agent";
 import { Agent as MastraAgent } from "@mastra/core/agent";
+import type { AuditContext } from "@/logger/audit.js";
 import { sanitizeSensitiveData } from "@/safety/index.js";
 import type { DatabaseSchema, QcpConfig } from "@/types/index.js";
 import type { AbstractDatabaseAgent } from "./database-agent.js";
@@ -12,6 +13,10 @@ import {
 
 export interface QcpSupervisorAgentOptions {
 	readonly config: QcpConfig;
+	readonly command?: string;
+	readonly sessionId?: string;
+	readonly connectionId?: string;
+	readonly connectionName?: string;
 	readonly databaseUrl: string;
 	readonly schema: DatabaseSchema;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
@@ -28,12 +33,14 @@ export interface ChatAgentResponse {
 
 export class QcpSupervisorAgent {
 	private readonly config: QcpConfig;
+	private readonly connectionName: string;
 	private readonly schema: DatabaseSchema;
 	private readonly databaseAgent: ProviderDatabaseAgent;
 	private readonly agent: Agent<"qcp-supervisor-agent">;
 
 	public constructor(options: QcpSupervisorAgentOptions) {
 		this.config = options.config;
+		this.connectionName = options.connectionName ?? "default";
 		this.schema = options.schema;
 		this.databaseAgent =
 			options.databaseAgent ??
@@ -42,6 +49,7 @@ export class QcpSupervisorAgent {
 				databaseUrl: options.databaseUrl,
 				schema: options.schema,
 				approvalHandler: options.approvalHandler,
+				auditContext: buildSupervisorAuditContext(options),
 			});
 		this.agent = new MastraAgent({
 			id: "qcp-supervisor-agent",
@@ -72,7 +80,11 @@ export class QcpSupervisorAgent {
 
 	public async generateResponse(question: string): Promise<ChatAgentResponse> {
 		const start = Date.now();
-		const directAnswer = getDirectChatAnswer(question, this.schema);
+		const directAnswer = getDirectChatAnswer(
+			question,
+			this.schema,
+			this.connectionName,
+		);
 		if (directAnswer) {
 			return {
 				text: directAnswer,
@@ -111,15 +123,34 @@ export class QcpSupervisorAgent {
 			"Never ask the database subagent to perform INSERT, UPDATE, DELETE, DDL, administrative operations, privilege changes, or destructive work.",
 			"Do not expose raw sensitive values. Summarize or aggregate when privacy-sensitive data may be involved.",
 			"When the database subagent returns results, synthesize a concise natural-language answer. SQL is an implementation detail unless the user explicitly asks to see it.",
+			`Active database connection: ${this.connectionName}.`,
 			`Configured database type: ${this.config.databaseType}.`,
 			`Loaded schema: ${this.schema.databaseName} with ${this.schema.tableCount} tables.`,
+			"To work with another configured database, tell the user to run qcp db use <alias> before starting ask or chat.",
 		].join("\n\n");
 	}
+}
+
+function buildSupervisorAuditContext(
+	options: QcpSupervisorAgentOptions,
+): AuditContext {
+	return {
+		command: options.command,
+		sessionId: options.sessionId,
+		installId: options.config.installId,
+		connectionId: options.connectionId,
+		connectionName: options.connectionName,
+		databaseType: options.config.databaseType,
+		databaseName: options.schema.databaseName,
+		provider: options.config.provider,
+		model: options.config.model,
+	};
 }
 
 export function getDirectChatAnswer(
 	question: string,
 	schema: DatabaseSchema,
+	connectionName = "default",
 ): string | null {
 	const normalized = question.trim().toLowerCase();
 	if (!normalized) return null;
@@ -132,7 +163,7 @@ export function getDirectChatAnswer(
 		return [
 			"I can help you understand and explore this database in plain English.",
 			"",
-			`I have schema context for ${schema.databaseName} with ${schema.tableCount} tables. You can ask about available tables, relationships, metrics, trends, counts, examples, anomalies, and how to write safer questions. When a question needs live data, I can ask the database subagent to run a validated read-only query.`,
+			`I have schema context for ${connectionName} (${schema.databaseName}) with ${schema.tableCount} tables. You can ask about available tables, relationships, metrics, trends, counts, examples, anomalies, and how to write safer questions. When a question needs live data, I can ask the database subagent to run a validated read-only query. Use qcp db use <alias> to switch databases before asking.`,
 		].join("\n");
 	}
 

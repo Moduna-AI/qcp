@@ -1,6 +1,10 @@
 import chalk from "chalk";
 import ora from "ora";
-import { getDatabaseUrl, loadConfig } from "@/config/index.js";
+import {
+	getActiveDatabaseConnection,
+	loadConfig,
+	withActiveDatabaseConnection,
+} from "@/config/index.js";
 import { explainQuery } from "@/db/index.js";
 import { createProvider } from "@/llm/index.js";
 import { isPromptViolationError } from "@/llm/prompts.js";
@@ -16,7 +20,7 @@ import {
 	printSql,
 } from "@/output/index.js";
 import { classifyPromptViolation, validateSql } from "@/safety/index.js";
-import { loadSchema } from "@/schema/index.js";
+import { loadSchemaForConnection } from "@/schema/index.js";
 import {
 	initTelemetry,
 	shutdownTelemetry,
@@ -36,20 +40,23 @@ export async function explainCommand(
 	initTelemetry(config);
 	trackActive();
 
-	const databaseUrl = getDatabaseUrl(config);
-	if (!databaseUrl) {
+	const connection = getActiveDatabaseConnection(config);
+	if (!connection) {
 		printError("No database connection configured.", "Run: qcp connect");
 		await shutdownTelemetry();
 		process.exit(1);
 	}
+	const activeConfig = withActiveDatabaseConnection(config, connection);
 
 	// ── Load schema ─────────────────────────────────────────────────────────────
 	const schemaSpinner = ora("Loading schema...").start();
 
 	let schema: DatabaseSchema;
 	try {
-		schema = loadSchema();
-		schemaSpinner.succeed(`Schema loaded (${schema.tableCount} tables)`);
+		schema = loadSchemaForConnection(connection).schema;
+		schemaSpinner.succeed(
+			`Schema loaded (${connection.name} · ${schema.tableCount} tables)`,
+		);
 	} catch (err: unknown) {
 		schemaSpinner.fail("Schema not found");
 		const message = err instanceof Error ? err.message : String(err);
@@ -61,7 +68,7 @@ export async function explainCommand(
 	// ── Create provider ─────────────────────────────────────────────────────────
 	let provider: LLMProvider;
 	try {
-		provider = createProvider(config);
+		provider = createProvider(activeConfig);
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
 		printError(message);
@@ -114,7 +121,7 @@ export async function explainCommand(
 		const planSpinner = ora("Fetching query plan...").start();
 		try {
 			const explain = await explainQuery(
-				databaseUrl,
+				connection.databaseUrl,
 				safetyReport.processedSql,
 			);
 			planSpinner.succeed("Query plan retrieved");

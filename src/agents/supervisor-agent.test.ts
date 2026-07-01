@@ -38,6 +38,9 @@ describe("qcp supervisor agent", () => {
 		expect(supervisor.getSubAgents().database.getDatabaseType()).toBe(
 			"supabase",
 		);
+		expect(supervisor.getSubAgents().database.getTools()).toHaveProperty(
+			"qcp_read_supabase_context",
+		);
 	});
 
 	test("answers capability chat without invoking a model or SQL pipeline", async () => {
@@ -73,6 +76,7 @@ function configWithDatabaseType(
 	return {
 		version: "0.1.0",
 		installId: "019a0000-0000-7000-8000-000000000000",
+		databaseConnections: [],
 		databaseType,
 		provider: "gemini",
 		model: "gemini-2.5-flash",

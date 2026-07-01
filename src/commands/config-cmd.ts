@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import {
 	CONFIG_PATH,
+	getActiveDatabaseConnection,
 	isDatabaseType,
 	loadConfig,
 	saveConfig,
@@ -9,7 +10,11 @@ import { printError, printSection, printSuccess } from "@/output/index.js";
 import type { ProviderName } from "@/types/index.js";
 
 const SETTABLE_BOOLEANS = ["safeMode", "showSql", "showMetrics", "telemetry"];
-const SETTABLE_STRINGS = ["ollamaHost"];
+const SETTABLE_STRINGS = [
+	"ollamaHost",
+	"prismaSchemaPath",
+	"prismaDatasourceName",
+];
 
 export function configShowCommand(): void {
 	const config = loadConfig();
@@ -22,7 +27,25 @@ export function configShowCommand(): void {
 	console.log();
 	console.log(`  Provider:     ${chalk.bold(config.provider)}`);
 	console.log(`  Model:        ${chalk.bold(config.model)}`);
-	console.log(`  Database:     ${chalk.bold(config.databaseType)}`);
+	const active = getActiveDatabaseConnection(config);
+	console.log(
+		`  Database:     ${active ? chalk.bold(active.name) : chalk.dim("not configured")}`,
+	);
+	if (config.databaseConnections.length > 0) {
+		console.log(`  Connections:  ${config.databaseConnections.length}`);
+		for (const connection of config.databaseConnections) {
+			const marker = connection.id === active?.id ? "*" : "-";
+			console.log(
+				`    ${marker} ${chalk.cyan(connection.name)} ${chalk.dim(connection.databaseType)} ${chalk.dim("[url redacted]")}`,
+			);
+		}
+	}
+	if (active?.prismaSchemaPath) {
+		console.log(`  Prisma file:  ${chalk.dim(active.prismaSchemaPath)}`);
+	}
+	if (active?.prismaDatasourceName) {
+		console.log(`  Datasource:   ${chalk.dim(active.prismaDatasourceName)}`);
+	}
 	console.log();
 	console.log(`  Safe mode:    ${boolLabel(config.safeMode)}`);
 	console.log(`  Show SQL:     ${boolLabel(config.showSql)}`);

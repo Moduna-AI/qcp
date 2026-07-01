@@ -1,13 +1,22 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import postgres from "postgres";
-import { ensureLocalDir, LOCAL_SCHEMA_PATH } from "@/config/index.js";
+import {
+	ensureLocalDir,
+	getActiveDatabaseConnection,
+	LOCAL_SCHEMA_CATALOG_PATH,
+	LOCAL_SCHEMA_PATH,
+	loadConfig,
+} from "@/config/index.js";
 import type {
+	ActiveDatabaseConnection,
 	DatabaseSchema,
+	SchemaCatalogEntry,
 	SchemaColumn,
 	SchemaForeignKey,
 	SchemaIndex,
 	SchemaTable,
 } from "@/types/index.js";
+import { SchemaCatalogStore } from "./catalog-store.js";
 
 // ─── Schema scanning ──────────────────────────────────────────────────────────
 
@@ -208,17 +217,75 @@ export async function scanSchema(databaseUrl: string): Promise<DatabaseSchema> {
 // ─── Persist / Load ────────────────────────────────────────────────────────────
 
 export function saveSchema(schema: DatabaseSchema): void {
-	ensureLocalDir();
-	writeFileSync(LOCAL_SCHEMA_PATH, JSON.stringify(schema, null, 2));
+	const connection = getActiveDatabaseConnection(loadConfig());
+	if (!connection) {
+		ensureLocalDir();
+		writeFileSync(LOCAL_SCHEMA_PATH, JSON.stringify(schema, null, 2));
+		return;
+	}
+
+	saveSchemaForConnection(connection, schema);
 }
 
 export function loadSchema(): DatabaseSchema {
+	const connection = getActiveDatabaseConnection(loadConfig());
+	if (!connection) {
+		return loadLegacySchema();
+	}
+
+	return loadSchemaForConnection(connection).schema;
+}
+
+export function saveSchemaForConnection(
+	connection: ActiveDatabaseConnection,
+	schema: DatabaseSchema,
+): SchemaCatalogEntry {
+	return createSchemaCatalogStore().upsert(connection, schema);
+}
+
+export function loadSchemaForConnection(
+	connection: ActiveDatabaseConnection,
+): SchemaCatalogEntry {
+	const store = createSchemaCatalogStore();
+	store.migrateLegacyIfNeeded(connection);
+	const entry = store.get(connection.id);
+	if (!entry) {
+		throw new Error(
+			"Schema not found. Run: qcp schema scan\n" +
+				"Make sure you are in the same directory where you ran qcp init.",
+		);
+	}
+
+	return entry;
+}
+
+export function listSchemaCatalogEntries(): SchemaCatalogEntry[] {
+	return createSchemaCatalogStore().list();
+}
+
+export function removeSchemaForConnection(connectionId: string): void {
+	createSchemaCatalogStore().remove(connectionId);
+}
+
+export function schemaCatalogHasConnection(connectionId: string): boolean {
+	return createSchemaCatalogStore().get(connectionId) !== undefined;
+}
+
+export function createSchemaCatalogStore(): SchemaCatalogStore {
+	return new SchemaCatalogStore({
+		catalogPath: LOCAL_SCHEMA_CATALOG_PATH,
+		legacySchemaPath: LOCAL_SCHEMA_PATH,
+	});
+}
+
+function loadLegacySchema(): DatabaseSchema {
 	if (!existsSync(LOCAL_SCHEMA_PATH)) {
 		throw new Error(
 			"Schema not found. Run: qcp schema scan\n" +
 				"Make sure you are in the same directory where you ran qcp init.",
 		);
 	}
+
 	const raw = readFileSync(LOCAL_SCHEMA_PATH, "utf-8");
 	return JSON.parse(raw) as DatabaseSchema;
 }

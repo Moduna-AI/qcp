@@ -4,6 +4,16 @@ import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { executeQuery, explainQuery } from "@/db/index.js";
 import {
+	type AuditAction,
+	type AuditContext,
+	type AuditOutcome,
+	buildAuditResource,
+	extractSqlTables,
+	type JsonValue,
+	resolveAuditActor,
+	writeAuditEvent,
+} from "@/logger/audit.js";
+import {
 	enforceTenantIsolation,
 	getApprovalReasons,
 	requiresSensitiveApproval,
@@ -85,6 +95,7 @@ export interface CreateDatabaseToolsOptions {
 	readonly enforceTenantIsolation?: boolean;
 	readonly prismaSchemaPath?: string;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
+	readonly auditContext?: AuditContext;
 }
 
 export function createDatabaseTools(
@@ -201,6 +212,7 @@ export function createDatabaseTools(
 						sensitiveTablePatterns,
 						enforceTenantIsolation: options.enforceTenantIsolation ?? false,
 						approvalHandler: options.approvalHandler,
+						auditContext: options.auditContext,
 					},
 					sql,
 					context,
@@ -264,6 +276,7 @@ export function createDatabaseTools(
 						sensitiveTablePatterns,
 						enforceTenantIsolation: options.enforceTenantIsolation ?? false,
 						approvalHandler: options.approvalHandler,
+						auditContext: options.auditContext,
 					},
 					sql,
 					context,
@@ -279,6 +292,7 @@ export interface SecureReadOptions {
 	readonly sensitiveTablePatterns?: readonly string[];
 	readonly enforceTenantIsolation?: boolean;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
+	readonly auditContext?: AuditContext;
 }
 
 export interface SecureExplainOptions {
@@ -288,6 +302,7 @@ export interface SecureExplainOptions {
 	readonly sensitiveTablePatterns?: readonly string[];
 	readonly enforceTenantIsolation?: boolean;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
+	readonly auditContext?: AuditContext;
 }
 
 export type SecureReadOutput =
@@ -333,14 +348,40 @@ export async function executeSecureReadQuery(
 		options.enforceTenantIsolation ?? false,
 		context,
 	);
-	if (!base.ok) return base;
+	if (!base.ok) {
+		await auditDatabaseAccess({
+			context: options.auditContext,
+			action: "QUERY_REJECTED",
+			outcome: "rejected",
+			sql,
+			safety: base.safety,
+			isolation: base.isolation,
+			approvalReasons: base.approvalReasons,
+			error: base.error,
+		});
+		return base;
+	}
 
-	const approved = await confirmApprovalIfNeeded(
-		base.approvalReasons,
-		base.processedSql,
-		options.approvalHandler,
-	);
+	const approved = await confirmApprovalIfNeeded({
+		reasons: base.approvalReasons,
+		sql: base.processedSql,
+		approvalHandler: options.approvalHandler,
+		auditContext: options.auditContext,
+		action: "READ",
+		safety: base.safety,
+		isolation: base.isolation,
+	});
 	if (!approved) {
+		await auditDatabaseAccess({
+			context: options.auditContext,
+			action: "APPROVAL_DENIED",
+			outcome: "cancelled",
+			sql: base.processedSql,
+			safety: base.safety,
+			isolation: base.isolation,
+			approvalReasons: base.approvalReasons,
+			error: "Query requires approval before execution.",
+		});
 		return {
 			ok: false,
 			safety: base.safety,
@@ -353,6 +394,16 @@ export async function executeSecureReadQuery(
 	const queryExecutor = options.queryExecutor ?? executeQuery;
 	try {
 		const result = await queryExecutor(options.databaseUrl, base.processedSql);
+		await auditDatabaseAccess({
+			context: options.auditContext,
+			action: "READ",
+			outcome: "success",
+			sql: base.processedSql,
+			safety: base.safety,
+			isolation: base.isolation,
+			approvalReasons: base.approvalReasons,
+			result,
+		});
 		return {
 			ok: true,
 			safety: base.safety,
@@ -361,6 +412,16 @@ export async function executeSecureReadQuery(
 			approvalReasons: base.approvalReasons,
 		};
 	} catch (err: unknown) {
+		await auditDatabaseAccess({
+			context: options.auditContext,
+			action: "READ",
+			outcome: "failure",
+			sql: base.processedSql,
+			safety: base.safety,
+			isolation: base.isolation,
+			approvalReasons: base.approvalReasons,
+			error: sanitizeDatabaseError(err),
+		});
 		return {
 			ok: false,
 			safety: base.safety,
@@ -383,7 +444,19 @@ export async function executeSecureExplainQuery(
 		options.enforceTenantIsolation ?? false,
 		context,
 	);
-	if (!base.ok) return base;
+	if (!base.ok) {
+		await auditDatabaseAccess({
+			context: options.auditContext,
+			action: "QUERY_REJECTED",
+			outcome: "rejected",
+			sql,
+			safety: base.safety,
+			isolation: base.isolation,
+			approvalReasons: base.approvalReasons,
+			error: base.error,
+		});
+		return base;
+	}
 
 	const explainExecutor = options.explainExecutor ?? explainQuery;
 	try {
@@ -397,12 +470,26 @@ export async function executeSecureExplainQuery(
 			[...(options.sensitiveTablePatterns ?? [])],
 			explain.estimatedRows,
 		);
-		const approved = await confirmApprovalIfNeeded(
-			approvalReasons,
-			base.processedSql,
-			options.approvalHandler,
-		);
+		const approved = await confirmApprovalIfNeeded({
+			reasons: approvalReasons,
+			sql: base.processedSql,
+			approvalHandler: options.approvalHandler,
+			auditContext: options.auditContext,
+			action: "EXPLAIN",
+			safety: base.safety,
+			isolation: base.isolation,
+		});
 		if (!approved) {
+			await auditDatabaseAccess({
+				context: options.auditContext,
+				action: "APPROVAL_DENIED",
+				outcome: "cancelled",
+				sql: base.processedSql,
+				safety: base.safety,
+				isolation: base.isolation,
+				approvalReasons,
+				error: "Query requires approval before EXPLAIN.",
+			});
 			return {
 				ok: false,
 				safety: base.safety,
@@ -412,6 +499,16 @@ export async function executeSecureExplainQuery(
 			};
 		}
 
+		await auditDatabaseAccess({
+			context: options.auditContext,
+			action: "EXPLAIN",
+			outcome: "success",
+			sql: base.processedSql,
+			safety: base.safety,
+			isolation: base.isolation,
+			approvalReasons,
+			estimatedRows: explain.estimatedRows,
+		});
 		return {
 			ok: true,
 			safety: base.safety,
@@ -421,6 +518,16 @@ export async function executeSecureExplainQuery(
 			approvalReasons,
 		};
 	} catch (err: unknown) {
+		await auditDatabaseAccess({
+			context: options.auditContext,
+			action: "EXPLAIN",
+			outcome: "failure",
+			sql: base.processedSql,
+			safety: base.safety,
+			isolation: base.isolation,
+			approvalReasons: base.approvalReasons,
+			error: sanitizeDatabaseError(err),
+		});
 		return {
 			ok: false,
 			safety: base.safety,
@@ -565,14 +672,122 @@ function getTenantScopedSql(
 	return isolation.processedSql;
 }
 
+interface ApprovalConfirmationOptions {
+	readonly reasons: readonly ApprovalReason[];
+	readonly sql: string;
+	readonly approvalHandler?: DatabaseToolApprovalHandler;
+	readonly auditContext?: AuditContext;
+	readonly action: "READ" | "EXPLAIN";
+	readonly safety: ReturnType<typeof validateSql>;
+	readonly isolation?: ReturnType<typeof enforceTenantIsolation>;
+}
+
 async function confirmApprovalIfNeeded(
-	reasons: readonly ApprovalReason[],
-	sql: string,
-	approvalHandler?: DatabaseToolApprovalHandler,
+	options: ApprovalConfirmationOptions,
 ): Promise<boolean> {
-	if (reasons.length === 0) return true;
-	if (!approvalHandler) return false;
-	return approvalHandler([...reasons], sql);
+	if (options.reasons.length === 0) return true;
+
+	await auditDatabaseAccess({
+		context: options.auditContext,
+		action: "APPROVAL_REQUIRED",
+		outcome: "success",
+		sql: options.sql,
+		safety: options.safety,
+		isolation: options.isolation,
+		approvalReasons: options.reasons,
+		metadata: { requestedAction: options.action },
+	});
+
+	if (!options.approvalHandler) return false;
+
+	const approved = await options.approvalHandler(
+		[...options.reasons],
+		options.sql,
+	);
+	await auditDatabaseAccess({
+		context: options.auditContext,
+		action: approved ? "APPROVAL_GRANTED" : "APPROVAL_DENIED",
+		outcome: approved ? "success" : "cancelled",
+		sql: options.sql,
+		safety: options.safety,
+		isolation: options.isolation,
+		approvalReasons: options.reasons,
+		metadata: { requestedAction: options.action },
+	});
+
+	return approved;
+}
+
+interface AuditDatabaseAccessOptions {
+	readonly context?: AuditContext;
+	readonly action: AuditAction;
+	readonly outcome: AuditOutcome;
+	readonly sql: string;
+	readonly safety: ReturnType<typeof validateSql>;
+	readonly isolation?: ReturnType<typeof enforceTenantIsolation>;
+	readonly approvalReasons: readonly ApprovalReason[];
+	readonly result?: QueryResult;
+	readonly estimatedRows?: number;
+	readonly error?: string;
+	readonly metadata?: JsonValue;
+}
+
+async function auditDatabaseAccess(
+	options: AuditDatabaseAccessOptions,
+): Promise<void> {
+	if (!options.context) return;
+
+	const metadata = {
+		safety: {
+			safe: options.safety.safe,
+			readOnly: options.safety.readOnly,
+			allowedStatement: options.safety.allowedStatement,
+			limitApplied: options.safety.limitApplied,
+			errors: options.safety.errors,
+			warnings: options.safety.warnings,
+		},
+		isolation: options.isolation
+			? {
+					safe: options.isolation.safe,
+					errors: options.isolation.errors,
+					warnings: options.isolation.warnings,
+					injectedPredicates: options.isolation.injectedPredicates,
+					scopedTables: options.isolation.scopedTables,
+				}
+			: null,
+		approvalReasons: options.approvalReasons.map((reason) => ({
+			type: reason.type,
+			detail: reason.detail,
+		})),
+		result: options.result
+			? {
+					rowCount: options.result.rowCount,
+					fields: options.result.fields,
+					executionTimeMs: options.result.executionTimeMs,
+				}
+			: null,
+		estimatedRows: options.estimatedRows ?? null,
+		error: options.error ?? null,
+		extra: options.metadata ?? null,
+	} satisfies JsonValue;
+
+	await writeAuditEvent(
+		{
+			scope: "data_access",
+			action: options.action,
+			actor: resolveAuditActor(options.context.installId),
+			resource: {
+				...buildAuditResource(options.context),
+				statementType: options.safety.statementType,
+				tables: extractSqlTables(options.sql),
+				sql: sanitizeSensitiveData(options.sql),
+			},
+			delta: null,
+			outcome: options.outcome,
+			metadata,
+		},
+		{ logsDir: options.context.logsDir },
+	);
 }
 
 interface RequestContextLike {
