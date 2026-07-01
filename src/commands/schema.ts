@@ -20,10 +20,7 @@ export async function schemaScanCommand(): Promise<void> {
 	const databaseUrl = getDatabaseUrl(config);
 
 	if (!databaseUrl) {
-		printError(
-			"No database connection configured.",
-			"Run: qcp connect postgres://user:pass@host/db",
-		);
+		printError("No database connection configured.", "Run: qcp connect");
 		process.exit(1);
 	}
 

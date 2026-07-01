@@ -4,6 +4,7 @@ import ora from "ora";
 import { ensureConfigDir, getDatabaseUrl, loadConfig } from "@/config/index.js";
 import { executeQuery, explainQuery } from "@/db/index.js";
 import { createProvider } from "@/llm/index.js";
+import { isPromptViolationError } from "@/llm/prompts.js";
 import { log } from "@/logger/index.js";
 import {
 	printApprovalWarning,
@@ -11,13 +12,19 @@ import {
 	printExplanation,
 	printInfo,
 	printMetrics,
+	printPromptViolation,
 	printQuestion,
 	printResults,
 	printSafetyReport,
 	printSql,
 	printSummary,
 } from "@/output/index.js";
-import { getApprovalReasons, validateSql } from "@/safety/index.js";
+import {
+	classifyPromptViolation,
+	getApprovalReasons,
+	sanitizeSensitiveData,
+	validateSql,
+} from "@/safety/index.js";
 import { loadSchema, schemaToContext } from "@/schema/index.js";
 import {
 	initTelemetry,
@@ -36,6 +43,7 @@ import type {
 	SqlGenerationResult,
 	SummaryResult,
 } from "@/types/index.js";
+import { handlePrismaQuestion, shouldUsePrismaAgent } from "./prisma-query.js";
 
 export interface AskOptions {
 	metrics?: boolean;
@@ -56,10 +64,7 @@ export async function askCommand(
 
 	const databaseUrl = getDatabaseUrl(config);
 	if (!databaseUrl) {
-		printError(
-			"No database connection configured.",
-			"Run: qcp connect postgres://user:pass@host/db",
-		);
+		printError("No database connection configured.", "Run: qcp connect");
 		await shutdownTelemetry();
 		process.exit(1);
 	}
@@ -99,6 +104,29 @@ export async function askCommand(
 
 	printQuestion(question);
 
+	const promptViolation = classifyPromptViolation(question);
+	if (promptViolation) {
+		printPromptViolation(promptViolation);
+		trackQueryRejected(`${promptViolation.category}_prompt_violation`);
+		await shutdownTelemetry();
+		process.exit(1);
+	}
+
+	if (shouldUsePrismaAgent(config)) {
+		const completed = await handlePrismaQuestion({
+			question,
+			schema,
+			config,
+			databaseUrl,
+			provider,
+			commandName: "ask",
+			options,
+		});
+		await shutdownTelemetry();
+		if (!completed) process.exit(1);
+		return;
+	}
+
 	// ── Generate SQL ──────────────────────────────────────────────────────────────
 	const sqlSpinner = ora("Generating SQL...").start();
 	let sqlResult: SqlGenerationResult;
@@ -110,6 +138,12 @@ export async function askCommand(
 		sqlSpinner.succeed("SQL generated");
 	} catch (err: unknown) {
 		sqlSpinner.fail("SQL generation failed");
+		if (isPromptViolationError(err)) {
+			printPromptViolation(err.violation);
+			trackQueryRejected(`${err.violation.category}_prompt_violation`);
+			await shutdownTelemetry();
+			process.exit(1);
+		}
 		const message = err instanceof Error ? err.message : String(err);
 		printError(message);
 		trackError("ask", "sql_generation_failed");
@@ -216,7 +250,12 @@ export async function askCommand(
 		process.exit(1);
 	}
 
-	printResults(queryResult);
+	const sanitizedQueryResult = sanitizeSensitiveData(queryResult);
+	const sanitizedProcessedSql = sanitizeSensitiveData(
+		safetyReport.processedSql,
+	);
+
+	printResults(sanitizedQueryResult);
 
 	// ── Generate summary ──────────────────────────────────────────────────────────
 	let summaryResult: SummaryResult | undefined;
@@ -225,10 +264,12 @@ export async function askCommand(
 	try {
 		summaryResult = await provider.generateSummary(
 			question,
-			safetyReport.processedSql,
-			queryResult,
+			sanitizedProcessedSql,
+			sanitizedQueryResult,
 			(chunk) => {
-				if (options.debug) process.stderr.write(chalk.dim(chunk));
+				if (options.debug) {
+					process.stderr.write(chalk.dim(sanitizeSensitiveData(chunk)));
+				}
 			},
 		);
 		summarySpinner.succeed("Summary ready");

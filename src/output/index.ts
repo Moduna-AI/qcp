@@ -1,7 +1,9 @@
 import chalk from "chalk";
 import Table from "cli-table3";
+import { sanitizeSensitiveData } from "@/safety/index.js";
 import type {
 	ApprovalReason,
+	PromptViolationReport,
 	QueryMetrics,
 	QueryResult,
 	SafetyReport,
@@ -22,7 +24,7 @@ export function printQuestion(question: string): void {
 
 export function printSql(sql: string): void {
 	console.log(chalk.bold("\nGenerated SQL:"));
-	const lines = sql.split("\n");
+	const lines = sanitizeSensitiveData(sql).split("\n");
 	for (const line of lines) {
 		console.log(chalk.cyan(`  ${line}`));
 	}
@@ -31,12 +33,14 @@ export function printSql(sql: string): void {
 export function printExplanation(explanation: string): void {
 	if (!explanation.trim()) return;
 	console.log(chalk.bold("\nExplanation:"));
-	console.log(chalk.white(`  ${explanation.replace(/\n/g, "\n  ")}`));
+	const sanitized = sanitizeSensitiveData(explanation);
+	console.log(chalk.white(`  ${sanitized.replace(/\n/g, "\n  ")}`));
 }
 
 export function printSummary(summary: string): void {
 	console.log(chalk.bold("\nInsight:"));
-	console.log(chalk.white(`  ${summary.replace(/\n/g, "\n  ")}`));
+	const sanitized = sanitizeSensitiveData(summary);
+	console.log(chalk.white(`  ${sanitized.replace(/\n/g, "\n  ")}`));
 }
 
 // ─── Safety report ────────────────────────────────────────────────────────────
@@ -88,7 +92,9 @@ export function printSafetyReport(report: SafetyReport): void {
 // ─── Results table ────────────────────────────────────────────────────────────
 
 export function printResults(result: QueryResult): void {
-	if (result.rowCount === 0) {
+	const sanitizedResult = sanitizeSensitiveData(result);
+
+	if (sanitizedResult.rowCount === 0) {
 		console.log(chalk.yellow("\n  No results found."));
 		return;
 	}
@@ -96,7 +102,7 @@ export function printResults(result: QueryResult): void {
 	console.log(chalk.bold("\nResults:"));
 
 	const table = new Table({
-		head: result.fields.map((f) => chalk.cyan(f)),
+		head: sanitizedResult.fields.map((f) => chalk.cyan(f)),
 		style: {
 			head: [],
 			border: ["grey"],
@@ -105,9 +111,9 @@ export function printResults(result: QueryResult): void {
 		wordWrap: true,
 	});
 
-	for (const row of result.rows) {
+	for (const row of sanitizedResult.rows) {
 		table.push(
-			result.fields.map((f) => {
+			sanitizedResult.fields.map((f) => {
 				const val = row[f];
 				if (val === null || val === undefined) return chalk.dim("NULL");
 				if (val instanceof Date)
@@ -121,8 +127,8 @@ export function printResults(result: QueryResult): void {
 
 	console.log(table.toString());
 	console.log(
-		chalk.dim(`  ${result.rowCount} row(s)`) +
-			chalk.dim(` · ${result.executionTimeMs}ms`),
+		chalk.dim(`  ${sanitizedResult.rowCount} row(s)`) +
+			chalk.dim(` · ${sanitizedResult.executionTimeMs}ms`),
 	);
 }
 
@@ -134,6 +140,14 @@ export function printApprovalWarning(reasons: ApprovalReason[]): void {
 	for (const reason of reasons) {
 		console.log(chalk.yellow(`   • ${reason.detail}`));
 	}
+}
+
+export function printPromptViolation(violation: PromptViolationReport): void {
+	const label = violation.category.toUpperCase();
+	console.error(chalk.red(`\n  ✗ ${violation.title}: `) + chalk.white(label));
+	console.error(chalk.white(`    ${violation.message}`));
+	console.error(chalk.dim(`    ${violation.detail}`));
+	console.error(chalk.dim("    No SQL was generated or executed."));
 }
 
 // ─── Metrics ──────────────────────────────────────────────────────────────────

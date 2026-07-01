@@ -97,9 +97,7 @@ export async function initCommand(): Promise<void> {
 		}
 
 		printSuccess("Created .qcp/ project directory");
-		printInfo(
-			"Run `qcp connect <database-url>` to add your PostgreSQL connection",
-		);
+		printInfo("Run `qcp connect` to add your database connection");
 		printInfo("Run `qcp schema scan` to scan your database schema");
 	} else {
 		printInfo(".qcp/ project directory already exists");
@@ -119,10 +117,7 @@ export async function initCommand(): Promise<void> {
 
 	console.log();
 	console.log(chalk.bold("Next steps:"));
-	console.log(
-		chalk.dim("  1. ") +
-			chalk.white("qcp connect postgres://user:pass@host/db"),
-	);
+	console.log(chalk.dim("  1. ") + chalk.white("qcp connect"));
 	console.log(chalk.dim("  2. ") + chalk.white("qcp schema scan"));
 	console.log(
 		chalk.dim("  3. ") +

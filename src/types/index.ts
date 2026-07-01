@@ -2,6 +2,13 @@
 
 export type ProviderName = "gemini" | "openai" | "anthropic" | "ollama";
 
+export type DatabaseType =
+	| "prisma-postgres"
+	| "neon"
+	| "supabase"
+	| "oracle-postgres"
+	| "other-postgres";
+
 export interface ApiKeys {
 	gemini?: string;
 	openai?: string;
@@ -11,6 +18,7 @@ export interface ApiKeys {
 export interface QcpConfig {
 	version: string;
 	installId: string;
+	databaseType: DatabaseType;
 	databaseUrl?: string;
 	provider: ProviderName;
 	model: string;
@@ -78,6 +86,20 @@ export interface SafetyReport {
 	statementType: string;
 }
 
+export interface SecurityRequestContext {
+	tenantId: string;
+	userId: string;
+}
+
+export interface TenantIsolationReport {
+	safe: boolean;
+	errors: string[];
+	warnings: string[];
+	processedSql: string;
+	injectedPredicates: string[];
+	scopedTables: string[];
+}
+
 // ─── LLM ──────────────────────────────────────────────────────────────────────
 
 export interface SqlGenerationResult {
@@ -120,6 +142,31 @@ export interface QueryResult {
 	fields: string[];
 	executionTimeMs: number;
 	explainPlan?: string;
+}
+
+export interface SecureQueryResult {
+	ok: true;
+	safety: SafetyReport;
+	isolation: TenantIsolationReport;
+	result: QueryResult;
+	approvalReasons: ApprovalReason[];
+}
+
+export interface SecureQueryError {
+	ok: false;
+	safety: SafetyReport;
+	isolation?: TenantIsolationReport;
+	error: string;
+	approvalReasons: ApprovalReason[];
+}
+
+export type PromptViolationCategory = "privacy" | "security" | "safety";
+
+export interface PromptViolationReport {
+	category: PromptViolationCategory;
+	title: string;
+	message: string;
+	detail: string;
 }
 
 export interface QueryMetrics {
