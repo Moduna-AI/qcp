@@ -1,12 +1,14 @@
 import { getApiKey } from "@/config/index.js";
+import {
+	providerPackageGroup,
+	requirePackageGroup,
+} from "@/packages/lazy-packages.js";
 import type { LLMProvider, ProviderName, QcpConfig } from "@/types/index.js";
-import { AnthropicProvider } from "./providers/anthropic.js";
-import { GeminiProvider } from "./providers/gemini.js";
 import { OllamaProvider } from "./providers/ollama.js";
-import { OpenAIProvider } from "./providers/openai.js";
 
-export function createProvider(config: QcpConfig): LLMProvider {
+export async function createProvider(config: QcpConfig): Promise<LLMProvider> {
 	const apiKey = getApiKey(config);
+	requirePackageGroup(providerPackageGroup(config.provider));
 
 	switch (config.provider) {
 		case "gemini": {
@@ -17,7 +19,8 @@ export function createProvider(config: QcpConfig): LLMProvider {
 						"Or set the environment variable: GEMINI_API_KEY=...",
 				);
 			}
-			return new GeminiProvider(apiKey, config.model);
+			const { GeminiProvider } = await import("./providers/gemini.js");
+			return await GeminiProvider.create(apiKey, config.model);
 		}
 
 		case "openai": {
@@ -28,7 +31,8 @@ export function createProvider(config: QcpConfig): LLMProvider {
 						"Or set the environment variable: OPENAI_API_KEY=...",
 				);
 			}
-			return new OpenAIProvider(apiKey, config.model);
+			const { OpenAIProvider } = await import("./providers/openai.js");
+			return await OpenAIProvider.create(apiKey, config.model);
 		}
 
 		case "anthropic": {
@@ -39,7 +43,8 @@ export function createProvider(config: QcpConfig): LLMProvider {
 						"Or set the environment variable: ANTHROPIC_API_KEY=...",
 				);
 			}
-			return new AnthropicProvider(apiKey, config.model);
+			const { AnthropicProvider } = await import("./providers/anthropic.js");
+			return await AnthropicProvider.create(apiKey, config.model);
 		}
 
 		case "ollama": {
@@ -70,4 +75,4 @@ export function getProviderLabel(
 	return `${labels[provider]} / ${model}`;
 }
 
-export { AnthropicProvider, GeminiProvider, OllamaProvider, OpenAIProvider };
+export { OllamaProvider };

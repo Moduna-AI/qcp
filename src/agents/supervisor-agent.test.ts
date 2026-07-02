@@ -27,8 +27,8 @@ const schema: DatabaseSchema = {
 };
 
 describe("qcp supervisor agent", () => {
-	test("configures the selected provider database subagent", () => {
-		const supervisor = new QcpSupervisorAgent({
+	test("configures the selected provider database subagent", async () => {
+		const supervisor = await QcpSupervisorAgent.create({
 			config: configWithDatabaseType("supabase"),
 			databaseUrl: "postgres://example",
 			schema,
@@ -44,7 +44,7 @@ describe("qcp supervisor agent", () => {
 	});
 
 	test("answers capability chat without invoking a model or SQL pipeline", async () => {
-		const supervisor = new QcpSupervisorAgent({
+		const supervisor = await QcpSupervisorAgent.create({
 			config: configWithDatabaseType("other-postgres"),
 			databaseUrl: "postgres://example",
 			schema,

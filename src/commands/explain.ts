@@ -19,6 +19,8 @@ import {
 	printSection,
 	printSql,
 } from "@/output/index.js";
+import { providerPackageGroup } from "@/packages/lazy-packages.js";
+import { ensurePackageGroups } from "@/packages/runtime.js";
 import { classifyPromptViolation, validateSql } from "@/safety/index.js";
 import { loadSchemaForConnection } from "@/schema/index.js";
 import {
@@ -68,7 +70,11 @@ export async function explainCommand(
 	// ── Create provider ─────────────────────────────────────────────────────────
 	let provider: LLMProvider;
 	try {
-		provider = createProvider(activeConfig);
+		await ensurePackageGroups({
+			commandName: "qcp explain",
+			groups: [providerPackageGroup(activeConfig.provider)],
+		});
+		provider = await createProvider(activeConfig);
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
 		printError(message);
