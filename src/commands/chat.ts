@@ -30,7 +30,11 @@ import {
 	type PackageGroup,
 	providerPackageGroup,
 } from "@/packages/lazy-packages.js";
-import { ensurePackageGroups } from "@/packages/runtime.js";
+import {
+	auditPackageGroups,
+	ensurePackageGroups,
+	type PackageGroupsAudit,
+} from "@/packages/runtime.js";
 import {
 	classifyPromptViolation,
 	sanitizeSensitiveData,
@@ -126,10 +130,13 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 	const sessionId = uuidv7();
 	let supervisor: QcpSupervisorAgent;
 	try {
-		await ensurePackageGroups({
-			commandName: "qcp chat",
-			groups: getChatRuntimePackageGroups(activeConfig),
-		});
+		const packageAudit = auditChatRuntimePackages(activeConfig);
+		if (packageAudit.missingGroups.length > 0) {
+			await ensurePackageGroups({
+				commandName: "qcp chat",
+				groups: packageAudit.missingGroups,
+			});
+		}
 		const { QcpSupervisorAgent } = await import(
 			"../agents/supervisor-agent.js"
 		);
@@ -235,6 +242,13 @@ function getChatRuntimePackageGroups(
 	];
 	if (config.databaseType === "prisma-postgres") groups.push("prisma");
 	return groups;
+}
+
+export function auditChatRuntimePackages(
+	config: ReturnType<typeof loadConfig>,
+	targetDir?: string,
+): PackageGroupsAudit {
+	return auditPackageGroups(getChatRuntimePackageGroups(config), targetDir);
 }
 
 // ─── Question handler ──────────────────────────────────────────────────────────

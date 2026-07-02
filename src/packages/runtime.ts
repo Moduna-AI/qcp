@@ -5,8 +5,17 @@ import {
 	getPackageGroupStatus,
 	getPackageStoreDir,
 	installPackageGroup,
+	type PackageGroupStatus,
 	type PackageGroup,
+	providerPackageGroup,
 } from "./lazy-packages.js";
+import type { ProviderName } from "@/types/index.js";
+
+export interface PackageGroupsAudit {
+	readonly requiredGroups: readonly PackageGroup[];
+	readonly missingGroups: readonly PackageGroup[];
+	readonly statuses: readonly PackageGroupStatus[];
+}
 
 export interface EnsurePackageGroupsOptions {
 	readonly commandName: string;
@@ -19,8 +28,9 @@ export interface EnsurePackageGroupsOptions {
 export async function ensurePackageGroups(
 	options: EnsurePackageGroupsOptions,
 ): Promise<void> {
-	const missing = uniqueGroups(options.groups).filter(
-		(group) => !getPackageGroupStatus(group, options.targetDir).installed,
+	const { missingGroups: missing } = auditPackageGroups(
+		options.groups,
+		options.targetDir,
 	);
 	if (missing.length === 0) return;
 
@@ -39,7 +49,7 @@ export async function ensurePackageGroups(
 		{
 			type: "confirm",
 			name: "confirmed",
-			message: `Install required qcp runtime packages for ${options.commandName}?`,
+			message: `Install missing qcp runtime package groups for ${options.commandName}: ${missing.join(", ")}?`,
 			default: true,
 		},
 	]);
@@ -81,6 +91,31 @@ export async function ensurePackageGroups(
 		}
 		spinner.succeed(`Installed ${group} packages`);
 	}
+}
+
+export function auditPackageGroups(
+	groups: readonly PackageGroup[],
+	targetDir?: string,
+): PackageGroupsAudit {
+	const requiredGroups = uniqueGroups(groups);
+	const statuses = requiredGroups.map((group) =>
+		getPackageGroupStatus(group, targetDir),
+	);
+
+	return {
+		requiredGroups,
+		missingGroups: statuses
+			.filter((status) => !status.installed)
+			.map((status) => status.group),
+		statuses,
+	};
+}
+
+export function auditProviderRuntimePackages(
+	provider: ProviderName,
+	targetDir?: string,
+): PackageGroupsAudit {
+	return auditPackageGroups([providerPackageGroup(provider)], targetDir);
 }
 
 function formatMissingPackageMessage(

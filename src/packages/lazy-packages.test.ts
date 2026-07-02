@@ -11,6 +11,7 @@ import {
 	type PackageCommandRunner,
 	providerPackageGroup,
 	requirePackageGroup,
+	resolveAvailablePackage,
 } from "./lazy-packages.js";
 
 function tempStore(): string {
@@ -30,6 +31,30 @@ function writeInstalledPackage(store: string, packageName: string): void {
 		JSON.stringify({ name: packageName, version: "1.0.0", main: "index.js" }),
 	);
 	writeFileSync(join(packageDir, "index.js"), "export default {};\n");
+}
+
+function writeInstalledPackageWithoutStoreManifest(
+	store: string,
+	packageName: string,
+): void {
+	const packageDir = join(store, "node_modules", ...packageName.split("/"));
+	mkdirSync(packageDir, { recursive: true });
+	writeFileSync(
+		join(packageDir, "package.json"),
+		JSON.stringify({
+			name: packageName,
+			version: "1.0.0",
+			exports: {
+				".": {
+					import: "./dist/index.mjs",
+					require: "./dist/index.js",
+				},
+			},
+		}),
+	);
+	mkdirSync(join(packageDir, "dist"), { recursive: true });
+	writeFileSync(join(packageDir, "dist", "index.mjs"), "export default {};\n");
+	writeFileSync(join(packageDir, "dist", "index.js"), "module.exports = {};\n");
 }
 
 describe("lazy package groups", () => {
@@ -52,10 +77,12 @@ describe("lazy package groups", () => {
 		expect(status.missingPackages).toEqual([]);
 	});
 
-	test("ollama group is installed without npm packages", () => {
-		const status = getPackageGroupStatus("provider-ollama", tempStore());
-		expect(status.installed).toBe(true);
-		expect(status.packages).toEqual([]);
+	test("built-in groups are installed without npm packages", () => {
+		for (const group of ["agent", "provider-ollama"] as const) {
+			const status = getPackageGroupStatus(group, tempStore());
+			expect(status.installed).toBe(true);
+			expect(status.packages).toEqual([]);
+		}
 	});
 
 	test("throws typed missing package error with install command", () => {
@@ -93,6 +120,42 @@ describe("lazy package groups", () => {
 		expect(commands).toEqual([
 			["bun", "add", "--cwd", store, "--exact", "@anthropic-ai/sdk"],
 		]);
+	});
+
+	test("skips bun add when package group is already installed", async () => {
+		const store = tempStore();
+		writeInstalledPackage(store, "openai");
+		const commands: string[][] = [];
+		const runner: PackageCommandRunner = async (command) => {
+			commands.push([...command]);
+			return { ok: true, exitCode: 0, stdout: "ok", stderr: "" };
+		};
+
+		const result = await installPackageGroup({
+			group: "provider-openai",
+			targetDir: store,
+			runner,
+		});
+
+		expect(result.ok).toBe(true);
+		expect(result.stdout).toContain("already installed");
+		expect(commands).toEqual([]);
+	});
+
+	test("resolves package store entry point without createRequire manifest support", () => {
+		const store = mkdtempSync(join(tmpdir(), "qcp-packages-test-"));
+		writeInstalledPackageWithoutStoreManifest(store, "@google/generative-ai");
+
+		expect(resolveAvailablePackage("@google/generative-ai", store)).toBe(
+			join(
+				store,
+				"node_modules",
+				"@google",
+				"generative-ai",
+				"dist",
+				"index.mjs",
+			),
+		);
 	});
 
 	test("lists all groups including telemetry and doctor bundle", () => {

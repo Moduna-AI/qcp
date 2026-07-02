@@ -1,14 +1,16 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { QCP_PACKAGES_DIR } from "@/config/index.js";
 import type { ProviderName } from "@/types/index.js";
 
+const runtimeRequire = createRequire(import.meta.url);
+
 export const PACKAGE_GROUPS = {
 	agent: {
-		description: "Mastra agent runtime for qcp ask and qcp chat",
-		packages: ["@mastra/core"] as const,
+		description: "Bundled qcp agent runtime; no npm package required",
+		packages: [] as const,
 	},
 	prisma: {
 		description: "Prisma MCP tools for Prisma Postgres connections",
@@ -62,6 +64,12 @@ export interface PackageCommandResult {
 	readonly exitCode: number;
 	readonly stdout: string;
 	readonly stderr: string;
+}
+
+interface PackageManifest {
+	readonly main?: string;
+	readonly module?: string;
+	readonly exports?: unknown;
 }
 
 export type PackageCommandRunner = (
@@ -169,6 +177,16 @@ export async function installPackageGroup(
 	options: InstallPackageGroupOptions,
 ): Promise<PackageCommandResult> {
 	const targetDir = options.targetDir ?? QCP_PACKAGES_DIR;
+	const status = getPackageGroupStatus(options.group, targetDir);
+	if (status.installed) {
+		return {
+			ok: true,
+			exitCode: 0,
+			stdout: `Package group already installed: ${options.group}`,
+			stderr: "",
+		};
+	}
+
 	const packages = PACKAGE_GROUPS[options.group].packages;
 	ensurePackageStore(targetDir);
 
@@ -239,8 +257,89 @@ export async function importPackageFromStore<TModule>(
 	packageName: string,
 	targetDir = QCP_PACKAGES_DIR,
 ): Promise<TModule> {
-	const resolved = resolvePackageFromStore(packageName, targetDir);
+	const resolved = resolveAvailablePackage(packageName, targetDir);
 	return (await import(resolved)) as TModule;
+}
+
+export function resolveAvailablePackage(
+	packageName: string,
+	targetDir = QCP_PACKAGES_DIR,
+): string {
+	try {
+		return resolvePackageFromStore(packageName, targetDir);
+	} catch {
+		const storeEntryPoint = resolvePackageEntryPoint(packageName, targetDir);
+		if (storeEntryPoint) return storeEntryPoint;
+
+		if (targetDir !== QCP_PACKAGES_DIR) {
+			throw new Error(
+				`Package not available in qcp package store: ${packageName}`,
+			);
+		}
+		return runtimeRequire.resolve(packageName);
+	}
+}
+
+function resolvePackageEntryPoint(
+	packageName: string,
+	targetDir: string,
+): string | null {
+	const packageDir = join(targetDir, "node_modules", ...packageName.split("/"));
+	const manifestPath = join(packageDir, "package.json");
+	if (!existsSync(manifestPath)) return null;
+
+	const manifest = readPackageManifest(manifestPath);
+	const entryPoint = getPackageEntryPoint(manifest);
+	if (!entryPoint) return null;
+
+	const resolved = join(packageDir, entryPoint);
+	return existsSync(resolved) ? resolved : null;
+}
+
+function readPackageManifest(manifestPath: string): PackageManifest {
+	const parsed: unknown = JSON.parse(readFileSync(manifestPath, "utf-8"));
+	if (!isRecord(parsed)) return {};
+
+	return {
+		main: typeof parsed.main === "string" ? parsed.main : undefined,
+		module: typeof parsed.module === "string" ? parsed.module : undefined,
+		exports: parsed.exports,
+	};
+}
+
+function getPackageEntryPoint(manifest: PackageManifest): string | null {
+	const exported = getExportEntryPoint(manifest.exports);
+	if (exported) return exported;
+	return manifest.module ?? manifest.main ?? "index.js";
+}
+
+function getExportEntryPoint(exportsField: unknown): string | null {
+	if (typeof exportsField === "string") return stripRelativePrefix(exportsField);
+	if (!isRecord(exportsField)) return null;
+
+	const rootExport = exportsField["."];
+	if (typeof rootExport === "string") return stripRelativePrefix(rootExport);
+	if (isRecord(rootExport)) {
+		for (const key of ["import", "default", "module", "require"]) {
+			const value = rootExport[key];
+			if (typeof value === "string") return stripRelativePrefix(value);
+		}
+	}
+
+	for (const key of ["import", "default", "module", "require"]) {
+		const value = exportsField[key];
+		if (typeof value === "string") return stripRelativePrefix(value);
+	}
+
+	return null;
+}
+
+function stripRelativePrefix(path: string): string {
+	return path.startsWith("./") ? path.slice(2) : path;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function formatInstallCommand(group: PackageGroup): string {
@@ -252,9 +351,8 @@ export function formatCommand(command: readonly string[]): string {
 }
 
 function isPackageInstalled(packageName: string, targetDir: string): boolean {
-	if (!existsSync(getPackageStoreManifestPath(targetDir))) return false;
 	try {
-		resolvePackageFromStore(packageName, targetDir);
+		resolveAvailablePackage(packageName, targetDir);
 		return true;
 	} catch {
 		return false;
