@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { DatabaseConnectionRegistry } from "./database-connection-registry.js";
+import {
+	DatabaseAliasConflictError,
+	DatabaseConnectionRegistry,
+	InvalidDatabaseAliasError,
+} from "./database-connection-registry.js";
 import {
 	createDefaultConfig,
 	getActiveDatabaseConnection,
@@ -186,7 +190,93 @@ describe("database connection registry", () => {
 				databaseType: "other-postgres",
 				databaseUrl: "postgres://prod/app",
 			}),
-		).toThrow();
+		).toThrow(InvalidDatabaseAliasError);
+	});
+
+	test("updates a connection while preserving id and createdAt", () => {
+		const config = parseQcpConfig({
+			databaseConnections: [
+				{
+					...connectionConfig(
+						"prod",
+						"other-postgres",
+						"postgres://prod/app",
+					),
+					createdAt: "2026-06-30T00:00:00.000Z",
+				},
+			],
+			activeDatabaseId: "prod",
+		});
+		const registry = new DatabaseConnectionRegistry(config);
+
+		const snapshot = registry.update("prod", {
+			name: "production",
+			databaseType: "neon",
+			databaseUrl: "postgres://production/app",
+		});
+
+		const updated = snapshot.connections[0];
+		expect(updated?.id).toBe("prod");
+		expect(updated?.name).toBe("production");
+		expect(updated?.createdAt).toBe("2026-06-30T00:00:00.000Z");
+		expect(updated?.databaseType).toBe("neon");
+		expect(updated?.databaseUrl).toBe("postgres://production/app");
+	});
+
+	test("rejects renames that collide with another connection", () => {
+		const config = parseQcpConfig({
+			databaseConnections: [
+				connectionConfig("prod", "other-postgres", "postgres://prod/app"),
+				connectionConfig(
+					"analytics",
+					"other-postgres",
+					"postgres://analytics/app",
+				),
+			],
+		});
+		const registry = new DatabaseConnectionRegistry(config);
+
+		expect(() => registry.update("prod", { name: "analytics" })).toThrow(
+			DatabaseAliasConflictError,
+		);
+	});
+
+	test("clears Prisma metadata when changing to a non-Prisma database", () => {
+		const config = parseQcpConfig({
+			databaseConnections: [
+				{
+					...connectionConfig(
+						"prod",
+						"prisma-postgres",
+						"postgres://prod/app",
+					),
+					prismaSchemaPath: "prisma/schema.prisma",
+					prismaDatasourceName: "db",
+				},
+			],
+		});
+		const registry = new DatabaseConnectionRegistry(config);
+
+		const snapshot = registry.update("prod", { databaseType: "neon" });
+
+		expect(snapshot.connections[0]?.prismaSchemaPath).toBeUndefined();
+		expect(snapshot.connections[0]?.prismaDatasourceName).toBeUndefined();
+	});
+
+	test("selects the next sorted connection after removing the active one", () => {
+		const config = parseQcpConfig({
+			databaseConnections: [
+				connectionConfig("zeta", "other-postgres", "postgres://zeta/app"),
+				connectionConfig("prod", "other-postgres", "postgres://prod/app"),
+				connectionConfig("alpha", "other-postgres", "postgres://alpha/app"),
+			],
+			activeDatabaseId: "prod",
+		});
+		const registry = new DatabaseConnectionRegistry(config);
+
+		const snapshot = registry.remove("prod");
+
+		expect(snapshot.activeDatabaseId).toBe("alpha");
 	});
 });
 

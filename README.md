@@ -123,7 +123,12 @@ qcp chat
 |---|---|
 | `qcp auth` | Guided wizard to configure Gemini, OpenAI, Anthropic, or Ollama |
 | `qcp init` | Initialize qcp config and local project files |
-| `qcp connect` | Guided database setup and connection test |
+| `qcp connect` | Add or replace a named database connection |
+| `qcp db list` | List configured database connections |
+| `qcp db current` | Show the active database connection |
+| `qcp db use <alias>` | Switch the active database connection |
+| `qcp db edit <alias>` | Modify a connection and refresh its schema |
+| `qcp db remove <alias>` | Remove a connection and its cached schema |
 | `qcp schema scan` | Index the database schema locally |
 | `qcp ask "<question>"` | Query your database in plain English |
 | `qcp chat` | Start interactive multi-question session |
@@ -156,9 +161,14 @@ qcp config set-key gemini AIza... # Save API key
 
 ```bash
 qcp config set-key gemini YOUR_API_KEY
-qcp connect --type neon postgres://readonly_user:password@host/db
-qcp connect --type prisma-postgres --schema prisma/schema.prisma --datasource db postgres://readonly_user:password@host/db
+qcp connect --name prod --type neon postgres://readonly_user:password@host/db
+qcp connect --name prod --type prisma-postgres --schema prisma/schema.prisma --datasource db postgres://readonly_user:password@host/db
+qcp db edit prod --name production
+qcp db edit production --type neon postgres://readonly_user:password@host/db
+qcp db remove production --yes
 ```
+
+Database connections are stored in `~/.qcp/config.json`; schema indexes are stored in `~/.qcp/schemas.json`. Successful `connect` and `db edit` runs test the final connection URL and refresh the schema index. Removing a database also removes its cached schema entry.
 
 ### Diagnostics
 
