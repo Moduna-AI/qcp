@@ -29,6 +29,18 @@ const schema: DatabaseSchema = {
 					nullable: false,
 					isPrimaryKey: false,
 				},
+				{
+					name: "customer_id",
+					type: "integer",
+					nullable: false,
+					isPrimaryKey: false,
+				},
+				{
+					name: "status",
+					type: "text",
+					nullable: false,
+					isPrimaryKey: false,
+				},
 			],
 			primaryKeys: ["id"],
 			foreignKeys: [],
@@ -142,6 +154,110 @@ describe("shared database agent tools", () => {
 			true,
 		);
 	});
+
+	test("suggests query improvements from a safe explain plan", async () => {
+		const tools = createDatabaseTools({
+			databaseUrl: "postgres://example",
+			schema,
+			explainExecutor: async () => ({
+				estimatedRows: 180,
+				plan: explainPlan({
+					"Node Type": "Seq Scan",
+					"Relation Name": "projects",
+					Schema: "public",
+					Filter: "((customer_id = 5) AND (status = 'pending'::text))",
+					"Plan Rows": 180,
+					"Total Cost": 340,
+				}),
+			}),
+		});
+
+		const result = await executeTool(tools, "qcp_suggest_query_improvements", {
+			sql: "SELECT * FROM projects WHERE customer_id = 5 AND status = 'pending'",
+		});
+		const output = result as {
+			ok: boolean;
+			analysis?: {
+				suggestedIndexes: Array<{ suggestionSql?: string }>;
+			};
+		};
+
+		expect(output.ok).toBe(true);
+		expect(output.analysis?.suggestedIndexes[0]?.suggestionSql).toBe(
+			"CREATE INDEX idx_projects_customer_id_status ON projects(customer_id, status);",
+		);
+	});
+
+	test("rejects unsafe SQL before query improvement analysis", async () => {
+		let explained = false;
+		const tools = createDatabaseTools({
+			databaseUrl: "postgres://example",
+			schema,
+			explainExecutor: async () => {
+				explained = true;
+				return { plan: "[]", estimatedRows: 0 };
+			},
+		});
+
+		const result = await executeTool(tools, "qcp_suggest_query_improvements", {
+			sql: "DROP TABLE projects",
+		});
+		const output = result as { ok: boolean; error?: string };
+
+		expect(output.ok).toBe(false);
+		expect(output.error).toMatch(/DROP/i);
+		expect(explained).toBe(false);
+	});
+
+	test("denies query improvement analysis when approval is rejected", async () => {
+		let explained = false;
+		const tools = createDatabaseTools({
+			databaseUrl: "postgres://example",
+			schema,
+			sensitiveTablePatterns: ["projects"],
+			approvalHandler: async () => false,
+			explainExecutor: async () => {
+				explained = true;
+				return { plan: "[]", estimatedRows: 0 };
+			},
+		});
+
+		const result = await executeTool(tools, "qcp_suggest_query_improvements", {
+			sql: "SELECT * FROM projects",
+		});
+		const output = result as { ok: boolean; error?: string };
+
+		expect(output.ok).toBe(false);
+		expect(output.error).toMatch(/approval/i);
+		expect(explained).toBe(false);
+	});
+
+	test("sanitizes query improvement plan output", async () => {
+		const tools = createDatabaseTools({
+			databaseUrl: "postgres://example",
+			schema,
+			explainExecutor: async () => ({
+				estimatedRows: 1,
+				plan: explainPlan({
+					"Node Type": "Seq Scan",
+					"Relation Name": "projects",
+					Schema: "public",
+					Filter: "(name = 'ada@example.com'::text)",
+					"Plan Rows": 1,
+					"Total Cost": 4,
+				}),
+			}),
+		});
+
+		const result = await executeTool(tools, "qcp_suggest_query_improvements", {
+			sql: "SELECT * FROM projects WHERE name = 'ada@example.com'",
+		});
+		const output = result as { ok: boolean; plan?: string };
+
+		expect(output.ok).toBe(true);
+		expect(output.plan).not.toContain("ada@example.com");
+		expect(output.plan).toContain("[REDACTED_EMAIL]");
+	});
 });
 
 async function executeTool(
@@ -187,4 +303,16 @@ function readAuditRecords(logsDir: string): AuditRecord[] {
 		.split("\n")
 		.filter((line) => line.trim().length > 0)
 		.map((line) => JSON.parse(line) as AuditRecord);
+}
+
+function explainPlan(plan: Record<string, unknown>): string {
+	return JSON.stringify([
+		{
+			"QUERY PLAN": [
+				{
+					Plan: plan,
+				},
+			],
+		},
+	]);
 }

@@ -408,10 +408,21 @@ program
 	.command("explain <question>")
 	.description("Show SQL for a question without executing it")
 	.option("--plan", "Include PostgreSQL EXPLAIN output")
-	.action(async (question: string, options: { plan?: boolean }) => {
-		const { explainCommand } = await import("../commands/explain.js");
-		await explainCommand(question, { showPlan: options.plan });
-	});
+	.option("--no-safe-mode", "Skip human approval prompts (advanced users only)")
+	.option("--yes", "Auto-approve all safety prompts")
+	.action(
+		async (
+			question: string,
+			options: { plan?: boolean; safeMode?: boolean; yes?: boolean },
+		) => {
+			const { explainCommand } = await import("../commands/explain.js");
+			await explainCommand(question, {
+				showPlan: options.plan,
+				safeMode: options.safeMode !== false,
+				noConfirm: options.yes,
+			});
+		},
+	);
 
 // ─── model ────────────────────────────────────────────────────────────────────
 

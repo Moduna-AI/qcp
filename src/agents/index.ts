@@ -8,6 +8,7 @@ export {
 	createDatabaseTools,
 	type DatabaseToolApprovalHandler,
 	executeSecureExplainQuery,
+	executeSecureQueryImprovementAnalysis,
 	executeSecureReadQuery,
 	formatSchemaForDatabaseAgent,
 } from "./database-tools.js";

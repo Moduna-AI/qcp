@@ -1,15 +1,17 @@
 import chalk from "chalk";
+import inquirer from "inquirer";
 import ora from "ora";
+import { executeSecureQueryImprovementAnalysis } from "@/agents/database-tools.js";
 import {
 	getActiveDatabaseConnection,
 	loadConfig,
 	withActiveDatabaseConnection,
 } from "@/config/index.js";
-import { explainQuery } from "@/db/index.js";
 import { createProvider } from "@/llm/index.js";
 import { isPromptViolationError } from "@/llm/prompts.js";
 import { log } from "@/logger/index.js";
 import {
+	printApprovalWarning,
 	printError,
 	printExplanation,
 	printInfo,
@@ -23,17 +25,29 @@ import {
 	auditProviderRuntimePackages,
 	ensurePackageGroups,
 } from "@/packages/runtime.js";
+import {
+	isLikelySql,
+	type QueryPerformanceAnalysis,
+} from "@/performance/query-performance-analyzer.js";
 import { classifyPromptViolation, validateSql } from "@/safety/index.js";
 import { loadSchemaForConnection } from "@/schema/index.js";
 import {
 	initTelemetry,
 	shutdownTelemetry,
 	trackActive,
+	trackHumanApproval,
 } from "@/telemetry/index.js";
-import type { DatabaseSchema, LLMProvider, SqlGenerationResult } from "@/types";
+import type {
+	ApprovalReason,
+	DatabaseSchema,
+	LLMProvider,
+	SqlGenerationResult,
+} from "@/types";
 
 export interface ExplainOptions {
 	showPlan?: boolean;
+	safeMode?: boolean;
+	noConfirm?: boolean;
 }
 
 export async function explainCommand(
@@ -69,90 +83,119 @@ export async function explainCommand(
 		process.exit(1);
 	}
 
-	// ── Create provider ─────────────────────────────────────────────────────────
-	let provider: LLMProvider;
-	try {
-		const packageAudit = auditProviderRuntimePackages(activeConfig.provider);
-		if (packageAudit.missingGroups.length > 0) {
-			await ensurePackageGroups({
-				commandName: "qcp explain",
-				groups: packageAudit.missingGroups,
-			});
-		}
-		provider = await createProvider(activeConfig);
-	} catch (err: unknown) {
-		const message = err instanceof Error ? err.message : String(err);
-		printError(message);
-		await shutdownTelemetry();
-		process.exit(1);
-	}
-
 	printQuestion(question);
+	const rawSqlInput = isLikelySql(question);
 
-	const promptViolation = classifyPromptViolation(question);
-	if (promptViolation) {
-		printPromptViolation(promptViolation);
-		await shutdownTelemetry();
-		process.exit(1);
-	}
+	let sql: string;
+	let generatedExplanation: string | undefined;
 
-	// ── Generate SQL ─────────────────────────────────────────────────────────────
-	const sqlSpinner = ora("Generating SQL...").start();
-
-	let sqlResult: SqlGenerationResult;
-	try {
-		sqlResult = await provider.generateSql(question, schema);
-		sqlSpinner.succeed("SQL generated");
-	} catch (err: unknown) {
-		sqlSpinner.fail("SQL generation failed");
-		if (isPromptViolationError(err)) {
-			printPromptViolation(err.violation);
+	if (rawSqlInput) {
+		sql = question;
+	} else {
+		const promptViolation = classifyPromptViolation(question);
+		if (promptViolation) {
+			printPromptViolation(promptViolation);
 			await shutdownTelemetry();
 			process.exit(1);
 		}
-		const message = err instanceof Error ? err.message : String(err);
-		printError(message);
-		await shutdownTelemetry();
-		process.exit(1);
+
+		// ── Create provider ───────────────────────────────────────────────────────
+		let provider: LLMProvider;
+		try {
+			const packageAudit = auditProviderRuntimePackages(activeConfig.provider);
+			if (packageAudit.missingGroups.length > 0) {
+				await ensurePackageGroups({
+					commandName: "qcp explain",
+					groups: packageAudit.missingGroups,
+				});
+			}
+			provider = await createProvider(activeConfig);
+		} catch (err: unknown) {
+			const message = err instanceof Error ? err.message : String(err);
+			printError(message);
+			await shutdownTelemetry();
+			process.exit(1);
+		}
+
+		// ── Generate SQL ─────────────────────────────────────────────────────────
+		const sqlSpinner = ora("Generating SQL...").start();
+
+		let sqlResult: SqlGenerationResult;
+		try {
+			sqlResult = await provider.generateSql(question, schema);
+			sqlSpinner.succeed("SQL generated");
+		} catch (err: unknown) {
+			sqlSpinner.fail("SQL generation failed");
+			if (isPromptViolationError(err)) {
+				printPromptViolation(err.violation);
+				await shutdownTelemetry();
+				process.exit(1);
+			}
+			const message = err instanceof Error ? err.message : String(err);
+			printError(message);
+			await shutdownTelemetry();
+			process.exit(1);
+		}
+
+		sql = sqlResult.sql;
+		generatedExplanation = sqlResult.explanation;
 	}
 
 	// ── Display SQL and explanation ──────────────────────────────────────────────
-	printSql(sqlResult.sql);
+	printSql(sql);
 
-	if (sqlResult.explanation) {
-		printExplanation(sqlResult.explanation);
+	if (generatedExplanation) {
+		printExplanation(generatedExplanation);
 	}
 
 	// ── Safety validation ────────────────────────────────────────────────────────
-	const safetyReport = validateSql(sqlResult.sql);
+	const safetyReport = validateSql(sql);
 	printSafetyReport(safetyReport);
 
-	// ── EXPLAIN plan ─────────────────────────────────────────────────────────────
-	if (options.showPlan && safetyReport.safe) {
-		const planSpinner = ora("Fetching query plan...").start();
-		try {
-			const explain = await explainQuery(
-				connection.databaseUrl,
-				safetyReport.processedSql,
-			);
-			planSpinner.succeed("Query plan retrieved");
+	let analysis: QueryPerformanceAnalysis | undefined;
+	let explainPlan: string | undefined;
+	let estimatedRows = 0;
 
-			printSection("Query Plan");
-			console.log(chalk.dim(explain.plan.slice(0, 3000)));
+	// ── Query performance suggestions ───────────────────────────────────────────
+	if (safetyReport.safe) {
+		const planSpinner = ora("Analyzing query plan...").start();
+		const suggestion = await executeSecureQueryImprovementAnalysis(
+			{
+				databaseUrl: connection.databaseUrl,
+				schema,
+				sensitiveTablePatterns: activeConfig.sensitiveTablePatterns,
+				approvalHandler: async (reasons, approvedSql) =>
+					confirmExplainInspection(reasons, approvedSql, activeConfig, options),
+			},
+			safetyReport.processedSql,
+		);
 
-			if (explain.estimatedRows > 0) {
-				console.log(
-					"\n" +
-						chalk.dim("  Estimated rows scanned: ") +
-						chalk.yellow(explain.estimatedRows.toLocaleString()),
-				);
-			}
-		} catch {
-			planSpinner.warn("Could not fetch query plan");
+		if (suggestion.ok) {
+			planSpinner.succeed("Query plan analyzed");
+			analysis = suggestion.analysis;
+			explainPlan = suggestion.plan;
+			estimatedRows = suggestion.estimatedRows;
+			printQueryPerformanceAnalysis(analysis);
+		} else {
+			planSpinner.warn(suggestion.error);
 		}
 	}
 
-	if (!options.showPlan && safetyReport.safe) {
+	// ── EXPLAIN plan ─────────────────────────────────────────────────────────────
+	if (options.showPlan && safetyReport.safe && explainPlan) {
+		printSection("Query Plan");
+		console.log(chalk.dim(explainPlan.slice(0, 3000)));
+
+		if (estimatedRows > 0) {
+			console.log(
+				"\n" +
+					chalk.dim("  Estimated rows scanned: ") +
+					chalk.yellow(estimatedRows.toLocaleString()),
+			);
+		}
+	}
+
+	if (!options.showPlan && safetyReport.safe && explainPlan) {
 		printInfo("Use --plan to see the PostgreSQL query execution plan");
 	}
 
@@ -161,9 +204,78 @@ export async function explainCommand(
 		printInfo("This query would be rejected before execution.");
 	} else {
 		console.log();
-		printInfo(`Run \`qcp ask "${question}"\` to execute this query`);
+		printInfo(
+			"This command only analyzes the query; suggested DDL was not executed.",
+		);
+		if (!rawSqlInput) {
+			printInfo(`Run \`qcp ask "${question}"\` to execute this query`);
+		}
 	}
 
 	log("info", "Explain completed", { question });
 	await shutdownTelemetry();
+}
+
+async function confirmExplainInspection(
+	reasons: ApprovalReason[],
+	_sql: string,
+	config: ReturnType<typeof loadConfig>,
+	options: ExplainOptions,
+): Promise<boolean> {
+	const safeMode = options.safeMode ?? config.safeMode;
+	if (!safeMode || options.noConfirm) return true;
+
+	printApprovalWarning(reasons);
+	const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([
+		{
+			type: "confirm",
+			name: "confirmed",
+			message: "Inspect this query plan?",
+			default: false,
+		},
+	]);
+
+	trackHumanApproval(confirmed);
+
+	if (!confirmed) {
+		console.log();
+		printInfo("Query plan inspection cancelled.");
+	}
+
+	return confirmed;
+}
+
+function printQueryPerformanceAnalysis(
+	analysis: QueryPerformanceAnalysis,
+): void {
+	printSection("Performance Suggestions");
+	console.log(chalk.dim(`  ${analysis.summary}`));
+
+	for (const finding of analysis.findings) {
+		if (finding.type === "plan_summary") continue;
+		const marker = finding.severity === "critical" ? "!" : "-";
+		const color =
+			finding.severity === "critical"
+				? chalk.yellow.bold
+				: finding.severity === "warning"
+					? chalk.yellow
+					: chalk.dim;
+		console.log();
+		console.log(color(`  ${marker} ${finding.title}`));
+		console.log(chalk.dim(`    ${finding.detail}`));
+		if (finding.suggestionSql) {
+			console.log();
+			console.log(chalk.green("    Suggested fix:"));
+			console.log(chalk.white(`    ${finding.suggestionSql}`));
+		}
+	}
+
+	if (
+		analysis.suggestedIndexes.length === 0 &&
+		analysis.warnings.length === 0
+	) {
+		console.log(
+			chalk.dim("  No missing-index or wide SELECT * suggestions found."),
+		);
+	}
 }
