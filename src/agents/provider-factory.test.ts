@@ -40,6 +40,17 @@ describe("provider database agent factory", () => {
 
 		expect(agent.getTools()).toHaveProperty("qcp_read_supabase_context");
 	});
+
+	test("passes Neon runtime context into the provider agent", async () => {
+		const agent = await createProviderDatabaseAgent({
+			config: configWithDatabaseType("neon"),
+			databaseUrl:
+				"postgresql://reader:secret@ep-cool-darkness-123456.us-east-2.aws.neon.tech/neondb?sslmode=require",
+			schema,
+		});
+
+		expect(agent.getTools()).toHaveProperty("qcp_read_neon_context");
+	});
 });
 
 function configWithDatabaseType(

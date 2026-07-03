@@ -16,6 +16,10 @@ export const PACKAGE_GROUPS = {
 		description: "Prisma MCP tools for Prisma Postgres connections",
 		packages: ["@mastra/mcp", "prisma"] as const,
 	},
+	neon: {
+		description: "Neon MCP docs context for Neon Postgres connections",
+		packages: ["@mastra/mcp"] as const,
+	},
 	"provider-gemini": {
 		description: "Google Gemini SDK",
 		packages: ["@google/generative-ai"] as const,
