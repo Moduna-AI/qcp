@@ -241,6 +241,7 @@ function getChatRuntimePackageGroups(
 		providerPackageGroup(config.provider),
 	];
 	if (config.databaseType === "prisma-postgres") groups.push("prisma");
+	if (config.databaseType === "neon") groups.push("neon");
 	return groups;
 }
 

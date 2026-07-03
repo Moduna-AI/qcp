@@ -4,6 +4,7 @@ import { isatty } from "node:tty";
 import chalk from "chalk";
 import inquirer from "inquirer";
 import ora from "ora";
+import { DatabaseConnectionManager } from "@/config/database-connection-manager.js";
 import {
 	DatabaseConnectionRegistry,
 	normalizeDatabaseAlias,
@@ -14,23 +15,15 @@ import {
 	inferDatabaseType,
 	isDatabaseType,
 	loadConfig,
-	saveConfig,
 	withActiveDatabaseConnection,
 } from "@/config/index.js";
-import { checkReadOnlyUser, testConnection } from "@/db/index.js";
-import {
-	buildAuditResource,
-	resolveAuditActor,
-	writeAuditEvent,
-} from "@/logger/audit.js";
-import { log } from "@/logger/index.js";
+import { testConnection } from "@/db/index.js";
 import {
 	printError,
 	printInfo,
 	printSuccess,
 	printWarning,
 } from "@/output/index.js";
-import { saveSchemaForConnection, scanSchema } from "@/schema/index.js";
 import type { DatabaseType, QcpConfig } from "@/types/index.js";
 
 export interface ConnectOptions {
@@ -46,7 +39,7 @@ interface DatabaseTypeInfo {
 	guidance: string[];
 }
 
-const DATABASE_TYPE_INFO: Record<DatabaseType, DatabaseTypeInfo> = {
+export const DATABASE_TYPE_INFO: Record<DatabaseType, DatabaseTypeInfo> = {
 	"prisma-postgres": {
 		label: "Prisma Postgres",
 		description: "Prisma-hosted PostgreSQL",
@@ -137,166 +130,42 @@ export async function connectCommand(
 	const spinner = ora(
 		`Testing ${DATABASE_TYPE_INFO[databaseType].label} connection...`,
 	).start();
+	const manager = new DatabaseConnectionManager();
+	const result = await manager.add({
+		name,
+		databaseType,
+		databaseUrl: url,
+		prismaSchemaPath,
+		prismaDatasourceName,
+	});
 
-	try {
-		const result = await testConnection(url);
-
-		if (!result.connected) {
-			spinner.fail("Connection failed");
-			printError(result.error ?? "Unknown connection error");
-			await auditConnectionEvent(config, {
-				name,
-				databaseType,
-				action: "CONNECTION_CHANGE",
-				outcome: "failure",
-				error: result.error ?? "Unknown connection error",
-			});
-			console.log();
-			printInfo("Common fixes:");
-			console.log(
-				chalk.dim("  • Check the database host and port are reachable"),
-			);
-			console.log(
-				chalk.dim("  • Verify the username and password are correct"),
-			);
-			console.log(chalk.dim("  • Ensure the database name exists"));
-			console.log(chalk.dim("  • Check firewall rules and pg_hba.conf"));
-			process.exit(1);
-		}
-
-		spinner.succeed(`Connected to ${result.version}`);
-
-		const registry = new DatabaseConnectionRegistry(config);
-		const snapshot = registry.upsert(
-			{
-				name,
-				databaseType,
-				databaseUrl: url,
-				prismaSchemaPath,
-				prismaDatasourceName,
-			},
-			{ setActive: true },
-		);
-		const savedConfig = saveConfig({
-			...config,
-			databaseConnections: snapshot.connections,
-			activeDatabaseId: snapshot.activeDatabaseId,
-		});
-		const connection = getActiveDatabaseConnection(savedConfig, name);
-		if (!connection) {
-			printError(`Database connection not found after saving: ${name}`);
-			process.exit(1);
-		}
-
-		// Check read-only permissions
-		const readOnlySpinner = ora("Checking permissions...").start();
-		const isReadOnly = await checkReadOnlyUser(connection.databaseUrl);
-
-		if (isReadOnly) {
-			readOnlySpinner.succeed("Read-only user verified");
-		} else {
-			readOnlySpinner.warn("User has write permissions");
-			printWarning(
-				"The connected user has write permissions. qcp enforces read-only at the " +
-					"SQL level, but for maximum safety, consider creating a dedicated read-only role:\n\n" +
-					chalk.dim("  CREATE ROLE qcp_readonly;\n") +
-					chalk.dim("  GRANT CONNECT ON DATABASE mydb TO qcp_readonly;\n") +
-					chalk.dim("  GRANT USAGE ON SCHEMA public TO qcp_readonly;\n") +
-					chalk.dim(
-						"  GRANT SELECT ON ALL TABLES IN SCHEMA public TO qcp_readonly;\n",
-					) +
-					chalk.dim(
-						"  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO qcp_readonly;",
-					),
-			);
-		}
-
-		const schemaSpinner = ora("Scanning schema...").start();
-		let scannedDatabaseName: string | undefined;
-		try {
-			const schema = await scanSchema(connection.databaseUrl);
-			scannedDatabaseName = schema.databaseName;
-			saveSchemaForConnection(connection, schema);
-			schemaSpinner.succeed(
-				`Schema indexed (${schema.tableCount} tables from ${schema.databaseName})`,
-			);
-		} catch (err: unknown) {
-			schemaSpinner.fail("Schema scan failed");
-			const message = err instanceof Error ? err.message : String(err);
-			printWarning(
-				`Connection was saved, but schema scan failed: ${message}\nRun: qcp schema scan --database ${name}`,
-			);
-		}
-
-		printSuccess("Database connection saved");
-		printInfo(`Connection: ${name} (active)`);
-		printInfo(`Database type: ${DATABASE_TYPE_INFO[databaseType].label}`);
-		if (prismaSchemaPath) printInfo(`Prisma schema: ${prismaSchemaPath}`);
-		if (prismaDatasourceName) {
-			printInfo(`Prisma datasource: ${prismaDatasourceName}`);
-		}
-		printInfo("Run `qcp db list` to view configured databases");
-
-		await auditConnectionEvent(savedConfig, {
-			name: connection.name,
-			connectionId: connection.id,
-			databaseType,
-			action: "CONNECTION_CHANGE",
-			outcome: "success",
-			databaseName: scannedDatabaseName,
-			readOnly: isReadOnly,
-		});
-		log("info", "Database connected", { version: result.version });
-	} catch (err: unknown) {
-		spinner.fail("Connection test failed");
-		const message = err instanceof Error ? err.message : String(err);
-		printError(message);
-		await auditConnectionEvent(config, {
-			name,
-			databaseType,
-			action: "CONNECTION_CHANGE",
-			outcome: "failure",
-			error: message,
-		});
-		log("error", "Connection failed", { error: message });
+	if (!result.ok) {
+		spinner.fail("Connection failed");
+		printError(result.error);
+		printCommonConnectionFixes();
 		process.exit(1);
 	}
-}
+	if (result.operation === "remove") {
+		spinner.fail("Connection failed");
+		printError("Unexpected database removal result while connecting.");
+		process.exit(1);
+	}
 
-async function auditConnectionEvent(
-	config: QcpConfig,
-	event: {
-		readonly name: string;
-		readonly connectionId?: string;
-		readonly databaseType: DatabaseType;
-		readonly action: "CONNECTION_CHANGE";
-		readonly outcome: "success" | "failure";
-		readonly databaseName?: string;
-		readonly readOnly?: boolean;
-		readonly error?: string;
-	},
-): Promise<void> {
-	await writeAuditEvent({
-		scope: "system_admin",
-		action: event.action,
-		actor: resolveAuditActor(config.installId),
-		resource: buildAuditResource({
-			command: "connect",
-			installId: config.installId,
-			connectionId: event.connectionId,
-			connectionName: event.name,
-			databaseType: event.databaseType,
-			databaseName: event.databaseName,
-			provider: config.provider,
-			model: config.model,
-		}),
-		delta: null,
-		outcome: event.outcome,
-		metadata: {
-			readOnly: event.readOnly ?? null,
-			error: event.error ?? null,
-		},
-	});
+	spinner.succeed(`Connected to ${result.databaseVersion}`);
+	printReadOnlyStatus(result.readOnly);
+	printSchemaStatus(result.connection.name, result.schema);
+	printSuccess("Database connection saved");
+	printInfo(`Connection: ${result.connection.name} (active)`);
+	printInfo(
+		`Database type: ${DATABASE_TYPE_INFO[result.connection.databaseType].label}`,
+	);
+	if (result.connection.prismaSchemaPath) {
+		printInfo(`Prisma schema: ${result.connection.prismaSchemaPath}`);
+	}
+	if (result.connection.prismaDatasourceName) {
+		printInfo(`Prisma datasource: ${result.connection.prismaDatasourceName}`);
+	}
+	printInfo("Run `qcp db list` to view configured databases");
 }
 
 function resolveNonInteractivePrismaSetup(
@@ -317,7 +186,7 @@ function resolveNonInteractivePrismaSetup(
 	};
 }
 
-function parseDatabaseTypeOption(
+export function parseDatabaseTypeOption(
 	type: string | undefined,
 ): DatabaseType | undefined {
 	if (!type) return undefined;
@@ -331,7 +200,7 @@ function parseDatabaseTypeOption(
 	process.exit(1);
 }
 
-function parseConnectionNameOption(
+export function parseConnectionNameOption(
 	name: string | undefined,
 ): string | undefined {
 	if (!name) return undefined;
@@ -388,6 +257,27 @@ async function resolveInteractiveSetup(
 		};
 	}
 
+	const { databaseType } = selectedType
+		? { databaseType: selectedType }
+		: await inquirer.prompt<{
+				databaseType: DatabaseType;
+			}>([
+				{
+					type: "select",
+					name: "databaseType",
+					message: "Select your database:",
+					default: config.databaseType,
+					choices: (Object.keys(DATABASE_TYPE_INFO) as DatabaseType[]).map(
+						(type) => ({
+							name: `${DATABASE_TYPE_INFO[type].label} — ${DATABASE_TYPE_INFO[type].description}`,
+							value: type,
+						}),
+					),
+				},
+			]);
+
+	printConnectionGuidance(databaseType);
+
 	const { name } = selectedName
 		? { name: selectedName }
 		: await inquirer.prompt<{ name: string }>([
@@ -400,25 +290,6 @@ async function resolveInteractiveSetup(
 					validate: validateConnectionName,
 				},
 			]);
-
-	const { databaseType } = await inquirer.prompt<{
-		databaseType: DatabaseType;
-	}>([
-		{
-			type: "select",
-			name: "databaseType",
-			message: "Select your database:",
-			default: selectedType ?? config.databaseType,
-			choices: (Object.keys(DATABASE_TYPE_INFO) as DatabaseType[]).map(
-				(type) => ({
-					name: `${DATABASE_TYPE_INFO[type].label} — ${DATABASE_TYPE_INFO[type].description}`,
-					value: type,
-				}),
-			),
-		},
-	]);
-
-	printConnectionGuidance(databaseType);
 
 	const existingConnection = new DatabaseConnectionRegistry(config).findByName(
 		name,
@@ -527,7 +398,7 @@ async function resolvePrismaSetup(
 	};
 }
 
-function printConnectionGuidance(databaseType: DatabaseType): void {
+export function printConnectionGuidance(databaseType: DatabaseType): void {
 	const info = DATABASE_TYPE_INFO[databaseType];
 	console.log();
 	console.log(chalk.bold(`  ${info.label} connection`));
@@ -537,7 +408,7 @@ function printConnectionGuidance(databaseType: DatabaseType): void {
 	console.log();
 }
 
-function validateDatabaseUrl(input: string): true | string {
+export function validateDatabaseUrl(input: string): true | string {
 	const value = input.trim();
 	if (!value) return "Database URL cannot be empty";
 	if (!/^postgres(ql)?:\/\//i.test(value)) {
@@ -546,7 +417,7 @@ function validateDatabaseUrl(input: string): true | string {
 	return true;
 }
 
-function validateConnectionName(input: string): true | string {
+export function validateConnectionName(input: string): true | string {
 	try {
 		normalizeDatabaseAlias(input);
 		return true;
@@ -555,7 +426,7 @@ function validateConnectionName(input: string): true | string {
 	}
 }
 
-function validatePrismaSchemaPath(input: string): true | string {
+export function validatePrismaSchemaPath(input: string): true | string {
 	const value = input.trim();
 	if (!value) return "Prisma schema path cannot be empty";
 	if (!value.endsWith(".prisma")) return "Use a .prisma schema file";
@@ -565,7 +436,7 @@ function validatePrismaSchemaPath(input: string): true | string {
 	return true;
 }
 
-function validatePrismaDatasourceName(input: string): true | string {
+export function validatePrismaDatasourceName(input: string): true | string {
 	const value = input.trim();
 	if (!value) return "Datasource name cannot be empty";
 	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
@@ -574,9 +445,62 @@ function validatePrismaDatasourceName(input: string): true | string {
 	return true;
 }
 
-function normalizeOptional(value: string | undefined): string | undefined {
+export function normalizeOptional(
+	value: string | undefined,
+): string | undefined {
 	const trimmed = value?.trim();
 	return trimmed ? trimmed : undefined;
+}
+
+export function printReadOnlyStatus(readOnly: boolean): void {
+	if (readOnly) {
+		printSuccess("Read-only user verified");
+		return;
+	}
+
+	printWarning(
+		"The connected user has write permissions. qcp enforces read-only at the " +
+			"SQL level, but for maximum safety, consider creating a dedicated read-only role:\n\n" +
+			chalk.dim("  CREATE ROLE qcp_readonly;\n") +
+			chalk.dim("  GRANT CONNECT ON DATABASE mydb TO qcp_readonly;\n") +
+			chalk.dim("  GRANT USAGE ON SCHEMA public TO qcp_readonly;\n") +
+			chalk.dim(
+				"  GRANT SELECT ON ALL TABLES IN SCHEMA public TO qcp_readonly;\n",
+			) +
+			chalk.dim(
+				"  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO qcp_readonly;",
+			),
+	);
+}
+
+export function printSchemaStatus(
+	connectionName: string,
+	schema: {
+		readonly status: "updated" | "failed";
+		readonly databaseName?: string;
+		readonly tableCount?: number;
+		readonly error?: string;
+	},
+): void {
+	if (schema.status === "updated") {
+		printSuccess(
+			`Schema indexed (${schema.tableCount} tables from ${schema.databaseName})`,
+		);
+		return;
+	}
+
+	printWarning(
+		`Connection was saved, but schema scan failed: ${schema.error}\nRun: qcp schema scan --database ${connectionName}`,
+	);
+}
+
+export function printCommonConnectionFixes(): void {
+	console.log();
+	printInfo("Common fixes:");
+	console.log(chalk.dim("  • Check the database host and port are reachable"));
+	console.log(chalk.dim("  • Verify the username and password are correct"));
+	console.log(chalk.dim("  • Ensure the database name exists"));
+	console.log(chalk.dim("  • Check firewall rules and pg_hba.conf"));
 }
 
 export async function showConnectionStatus(): Promise<void> {

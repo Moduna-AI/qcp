@@ -125,7 +125,19 @@ ${chalk.bold("Tip:")} Create a read-only role for maximum safety:
 
 const db = program
 	.command("db")
-	.description("Manage configured database connections");
+	.description("Manage configured database connections")
+	.addHelpText(
+		"after",
+		`
+${chalk.bold("Examples:")}
+  qcp db list
+  qcp db current
+  qcp db use prod
+  qcp db edit prod --name production
+  qcp db edit prod --type neon postgres://readonly_user:password@host/db
+  qcp db remove prod --yes
+`,
+	);
 
 db.command("list")
 	.description("List configured database connections")
@@ -147,6 +159,45 @@ db.command("use <alias>")
 		const { dbUseCommand } = await import("../commands/db.js");
 		await dbUseCommand(alias);
 	});
+
+db.command("edit <alias> [database-url]")
+	.description("Modify a database connection and refresh its schema cache")
+	.option("--name <alias>", "New connection alias")
+	.option(
+		"--type <database-type>",
+		"Database type: prisma-postgres, neon, supabase, oracle-postgres, other-postgres",
+	)
+	.option("--schema <path>", "Local Prisma schema.prisma path")
+	.option("--datasource <name>", "Prisma datasource name")
+	.addHelpText(
+		"after",
+		`
+${chalk.bold("Example:")}
+  qcp db edit prod --name production
+  qcp db edit prod --type neon postgres://readonly_user:password@host/db
+  qcp db edit prod --type prisma-postgres --schema prisma/schema.prisma --datasource db postgres://readonly_user:password@host/db
+`,
+	)
+	.action(
+		async (
+			alias: string,
+			databaseUrl: string | undefined,
+			options: {
+				name?: string;
+				type?: string;
+				schema?: string;
+				datasource?: string;
+			},
+		) => {
+			const { dbEditCommand } = await import("../commands/db.js");
+			await dbEditCommand(alias, databaseUrl, {
+				name: options.name,
+				type: options.type,
+				schema: options.schema,
+				datasource: options.datasource,
+			});
+		},
+	);
 
 db.command("remove <alias>")
 	.description("Remove a database connection and its local schema cache")

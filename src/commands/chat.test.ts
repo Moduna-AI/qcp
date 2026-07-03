@@ -60,6 +60,26 @@ describe("chat runtime package audit", () => {
 		]);
 		expect(audit.missingGroups).toEqual(["prisma"]);
 	});
+
+	test("reports Neon package group only for Neon databases", () => {
+		const store = tempStore();
+		writeInstalledPackage(store, "@google/generative-ai");
+
+		const audit = auditChatRuntimePackages(
+			configWith({
+				provider: "gemini",
+				databaseType: "neon",
+			}),
+			store,
+		);
+
+		expect(audit.requiredGroups).toEqual([
+			"agent",
+			"provider-gemini",
+			"neon",
+		]);
+		expect(audit.missingGroups).toEqual(["neon"]);
+	});
 });
 
 function configWith(

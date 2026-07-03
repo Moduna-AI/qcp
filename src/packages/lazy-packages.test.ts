@@ -77,6 +77,18 @@ describe("lazy package groups", () => {
 		expect(status.missingPackages).toEqual([]);
 	});
 
+	test("tracks Neon MCP as a Neon-only package group", () => {
+		const store = tempStore();
+		let status = getPackageGroupStatus("neon", store);
+		expect(status.installed).toBe(false);
+		expect(status.missingPackages).toEqual(["@mastra/mcp"]);
+
+		writeInstalledPackage(store, "@mastra/mcp");
+		status = getPackageGroupStatus("neon", store);
+		expect(status.installed).toBe(true);
+		expect(status.missingPackages).toEqual([]);
+	});
+
 	test("built-in groups are installed without npm packages", () => {
 		for (const group of ["agent", "provider-ollama"] as const) {
 			const status = getPackageGroupStatus(group, tempStore());
@@ -162,6 +174,7 @@ describe("lazy package groups", () => {
 		const groups = listPackageGroupStatuses(tempStore()).map(
 			(status) => status.group,
 		);
+		expect(groups).toContain("neon");
 		expect(groups).toContain("telemetry");
 		expect(groups).toContain("doctor-bundle");
 		expect(groups).toContain("provider-ollama");

@@ -12,7 +12,15 @@ export {
 	formatSchemaForDatabaseAgent,
 } from "./database-tools.js";
 export { createMastraModelConfig } from "./model-config.js";
-export { NeonAgent, type NeonAgentConfig } from "./neon-agent.js";
+export {
+	type CreateNeonToolsOptions,
+	createNeonTools,
+	inferNeonConnection,
+	NeonAgent,
+	type NeonAgentConfig,
+	type NeonMcpDocsContext,
+	loadNeonMcpDocsContext,
+} from "./neon-agent.js";
 export {
 	OraclePostgresAgent,
 	type OraclePostgresAgentConfig,
