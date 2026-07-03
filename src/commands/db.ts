@@ -1,11 +1,11 @@
 import { isatty } from "node:tty";
 import chalk from "chalk";
 import inquirer from "inquirer";
+import { DatabaseConnectionManager } from "@/config/database-connection-manager.js";
 import {
 	DatabaseConnectionRegistry,
 	normalizeDatabaseAlias,
 } from "@/config/database-connection-registry.js";
-import { DatabaseConnectionManager } from "@/config/database-connection-manager.js";
 import {
 	getActiveDatabaseConnection,
 	isDatabaseType,
@@ -280,9 +280,7 @@ async function resolveEditSetup(
 			prismaSchemaPath:
 				databaseType === "prisma-postgres" ? providedSchemaPath : undefined,
 			prismaDatasourceName:
-				databaseType === "prisma-postgres"
-					? providedDatasourceName
-					: undefined,
+				databaseType === "prisma-postgres" ? providedDatasourceName : undefined,
 		};
 	}
 
@@ -318,7 +316,8 @@ async function resolveEditSetup(
 
 	printConnectionGuidance(databaseType);
 	const finalUrl =
-		providedUrl ?? (await resolveInteractiveEditDatabaseUrl(existingConnection));
+		providedUrl ??
+		(await resolveInteractiveEditDatabaseUrl(existingConnection));
 	const prismaSetup = await resolveEditPrismaSetup(
 		existingConnection,
 		databaseType,
@@ -424,7 +423,9 @@ function parseDatabaseType(type: string | undefined): DatabaseType | undefined {
 	process.exit(1);
 }
 
-function parseOptionalConnectionName(name: string | undefined): string | undefined {
+function parseOptionalConnectionName(
+	name: string | undefined,
+): string | undefined {
 	if (!name) return undefined;
 
 	try {

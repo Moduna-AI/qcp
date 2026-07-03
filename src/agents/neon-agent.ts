@@ -152,7 +152,9 @@ export function createNeonTools(options: CreateNeonToolsOptions): ToolsInput {
 			},
 			execute: async () => {
 				const connection = inferNeonConnection(options.databaseUrl);
-				const mcpDocs = await (options.mcpDocsLoader ?? loadNeonMcpDocsContext)();
+				const mcpDocs = await (
+					options.mcpDocsLoader ?? loadNeonMcpDocsContext
+				)();
 
 				return {
 					databaseName: options.schema.databaseName,
@@ -184,12 +186,13 @@ export interface InferredNeonConnection {
 	readonly sslMode?: string;
 }
 
-export function inferNeonConnection(databaseUrl: string): InferredNeonConnection {
+export function inferNeonConnection(
+	databaseUrl: string,
+): InferredNeonConnection {
 	try {
 		const url = new URL(databaseUrl);
-		const endpointMatch = /^(ep-[a-z0-9-]+?)(-pooler)?\.(.+\.neon\.tech)$/i.exec(
-			url.hostname,
-		);
+		const endpointMatch =
+			/^(ep-[a-z0-9-]+?)(-pooler)?\.(.+\.neon\.tech)$/i.exec(url.hostname);
 		const endpointId = endpointMatch?.[1];
 		const pooledConnection = endpointMatch
 			? endpointMatch[2] === "-pooler"
@@ -235,7 +238,10 @@ export type NeonMcpDocsLoader = () => Promise<NeonMcpDocsContext>;
 
 export interface NeonMcpDocsClient {
 	listToolsWithErrors(): Promise<{
-		readonly tools: Record<string, ToolAction<unknown, unknown, unknown, unknown>>;
+		readonly tools: Record<
+			string,
+			ToolAction<unknown, unknown, unknown, unknown>
+		>;
 		readonly errors: Record<string, string>;
 	}>;
 	disconnect(): Promise<void>;
@@ -286,9 +292,7 @@ export async function loadNeonMcpDocsContext(
 	}
 }
 
-async function createNeonMcpClient(
-	apiKey: string,
-): Promise<NeonMcpDocsClient> {
+async function createNeonMcpClient(apiKey: string): Promise<NeonMcpDocsClient> {
 	const { MCPClient } = await importPackageFromStore<McpModule>("@mastra/mcp");
 	return new MCPClient({
 		id: `qcp-neon-${randomUUID()}`,

@@ -104,6 +104,11 @@ export async function createProviderDatabaseAgent(
 				description:
 					"Answers questions about PostgreSQL-compatible Oracle-hosted databases using qcp read-only database tools.",
 				model,
+				databaseUrl: options.databaseUrl,
+				schema: options.schema,
+				sensitiveTablePatterns: options.config.sensitiveTablePatterns,
+				approvalHandler: options.approvalHandler,
+				auditContext: options.auditContext,
 				tools,
 			});
 		}

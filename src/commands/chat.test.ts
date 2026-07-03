@@ -73,11 +73,7 @@ describe("chat runtime package audit", () => {
 			store,
 		);
 
-		expect(audit.requiredGroups).toEqual([
-			"agent",
-			"provider-gemini",
-			"neon",
-		]);
+		expect(audit.requiredGroups).toEqual(["agent", "provider-gemini", "neon"]);
 		expect(audit.missingGroups).toEqual(["neon"]);
 	});
 });

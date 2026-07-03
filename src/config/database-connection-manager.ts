@@ -1,7 +1,5 @@
-import {
-	checkReadOnlyUser,
-	testConnection,
-} from "@/db/index.js";
+import { checkReadOnlyUser, testConnection } from "@/db/index.js";
+import type { AuditEventInput, AuditWriteResult } from "@/logger/audit.js";
 import {
 	buildAuditResource,
 	resolveAuditActor,
@@ -19,10 +17,6 @@ import type {
 	DatabaseType,
 	QcpConfig,
 } from "@/types/index.js";
-import type {
-	AuditEventInput,
-	AuditWriteResult,
-} from "@/logger/audit.js";
 import {
 	DatabaseConnectionNotFoundError,
 	DatabaseConnectionRegistry,
@@ -136,28 +130,33 @@ export class DatabaseConnectionManager {
 	public async add(
 		input: AddDatabaseConnectionInput,
 	): Promise<DatabaseConnectionManagerResult> {
-		return await this.saveVerifiedConnection("add", "connect", input.name, () => {
-			const config = this.dependencies.loadConfig();
-			const registry = new DatabaseConnectionRegistry(config);
-			const snapshot = registry.upsert(
-				{
-					name: input.name,
-					databaseType: input.databaseType,
-					databaseUrl: input.databaseUrl,
-					prismaSchemaPath:
-						input.databaseType === "prisma-postgres"
-							? input.prismaSchemaPath
-							: undefined,
-					prismaDatasourceName:
-						input.databaseType === "prisma-postgres"
-							? input.prismaDatasourceName
-							: undefined,
-				},
-				{ setActive: true },
-			);
+		return await this.saveVerifiedConnection(
+			"add",
+			"connect",
+			input.name,
+			() => {
+				const config = this.dependencies.loadConfig();
+				const registry = new DatabaseConnectionRegistry(config);
+				const snapshot = registry.upsert(
+					{
+						name: input.name,
+						databaseType: input.databaseType,
+						databaseUrl: input.databaseUrl,
+						prismaSchemaPath:
+							input.databaseType === "prisma-postgres"
+								? input.prismaSchemaPath
+								: undefined,
+						prismaDatasourceName:
+							input.databaseType === "prisma-postgres"
+								? input.prismaDatasourceName
+								: undefined,
+					},
+					{ setActive: true },
+				);
 
-			return this.buildPendingConnection(config, snapshot, input.name);
-		});
+				return this.buildPendingConnection(config, snapshot, input.name);
+			},
+		);
 	}
 
 	public async edit(

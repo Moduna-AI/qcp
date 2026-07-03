@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type {
-	AuditEventInput,
-	AuditWriteResult,
-} from "@/logger/audit.js";
+import type { AuditEventInput, AuditWriteResult } from "@/logger/audit.js";
 import type {
 	ActiveDatabaseConnection,
 	DatabaseConnectionConfig,
@@ -110,11 +107,14 @@ describe("DatabaseConnectionManager", () => {
 
 	test("removes a connection and its schema cache", async () => {
 		const harness = createHarness(
-			createConfigWithConnections([
-				connectionConfig("zeta", "other-postgres", "postgres://zeta/app"),
-				connectionConfig("prod", "other-postgres", "postgres://prod/app"),
-				connectionConfig("alpha", "other-postgres", "postgres://alpha/app"),
-			], "prod"),
+			createConfigWithConnections(
+				[
+					connectionConfig("zeta", "other-postgres", "postgres://zeta/app"),
+					connectionConfig("prod", "other-postgres", "postgres://prod/app"),
+					connectionConfig("alpha", "other-postgres", "postgres://alpha/app"),
+				],
+				"prod",
+			),
 		);
 		const manager = new DatabaseConnectionManager(harness.dependencies);
 
@@ -124,9 +124,9 @@ describe("DatabaseConnectionManager", () => {
 		expect(result.removedConnection.name).toBe("prod");
 		expect(result.activeDatabaseId).toBe("alpha");
 		expect(harness.removedSchemaIds).toEqual(["prod"]);
-		expect(harness.currentConfig.databaseConnections.map((item) => item.name)).toEqual(
-			["alpha", "zeta"],
-		);
+		expect(
+			harness.currentConfig.databaseConnections.map((item) => item.name),
+		).toEqual(["alpha", "zeta"]);
 		expect(harness.auditEvents[0]?.outcome).toBe("success");
 	});
 

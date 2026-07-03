@@ -51,6 +51,17 @@ describe("provider database agent factory", () => {
 
 		expect(agent.getTools()).toHaveProperty("qcp_read_neon_context");
 	});
+
+	test("passes Oracle PostgreSQL runtime context into the provider agent", async () => {
+		const agent = await createProviderDatabaseAgent({
+			config: configWithDatabaseType("oracle-postgres"),
+			databaseUrl:
+				"postgresql://reader:secret@postgres.us-ashburn-1.oraclecloud.com:5432/appdb?sslmode=require",
+			schema,
+		});
+
+		expect(agent.getTools()).toHaveProperty("qcp_read_oracle_postgres_context");
+	});
 });
 
 function configWithDatabaseType(

@@ -197,11 +197,7 @@ describe("database connection registry", () => {
 		const config = parseQcpConfig({
 			databaseConnections: [
 				{
-					...connectionConfig(
-						"prod",
-						"other-postgres",
-						"postgres://prod/app",
-					),
+					...connectionConfig("prod", "other-postgres", "postgres://prod/app"),
 					createdAt: "2026-06-30T00:00:00.000Z",
 				},
 			],
@@ -245,11 +241,7 @@ describe("database connection registry", () => {
 		const config = parseQcpConfig({
 			databaseConnections: [
 				{
-					...connectionConfig(
-						"prod",
-						"prisma-postgres",
-						"postgres://prod/app",
-					),
+					...connectionConfig("prod", "prisma-postgres", "postgres://prod/app"),
 					prismaSchemaPath: "prisma/schema.prisma",
 					prismaDatasourceName: "db",
 				},

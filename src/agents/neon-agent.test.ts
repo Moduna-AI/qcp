@@ -95,7 +95,9 @@ describe("neon database agent", () => {
 		)) as NeonContextOutput;
 		const serialized = JSON.stringify(context);
 
-		expect(context.host).toBe("ep-cool-darkness-123456.us-east-2.aws.neon.tech");
+		expect(context.host).toBe(
+			"ep-cool-darkness-123456.us-east-2.aws.neon.tech",
+		);
 		expect(context.endpointId).toBe("ep-cool-darkness-123456");
 		expect(context.regionHint).toBe("us-east-2.aws");
 		expect(context.pooledConnection).toBe(false);

@@ -16,12 +16,16 @@ export {
 	type CreateNeonToolsOptions,
 	createNeonTools,
 	inferNeonConnection,
+	loadNeonMcpDocsContext,
 	NeonAgent,
 	type NeonAgentConfig,
 	type NeonMcpDocsContext,
-	loadNeonMcpDocsContext,
 } from "./neon-agent.js";
 export {
+	type CreateOraclePostgresToolsOptions,
+	createOraclePostgresTools,
+	type InferredOraclePostgresConnection,
+	inferOraclePostgresConnection,
 	OraclePostgresAgent,
 	type OraclePostgresAgentConfig,
 } from "./oracle-postgres-agent.js";
