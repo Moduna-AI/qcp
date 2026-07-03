@@ -22,6 +22,7 @@ export const QCP_PACKAGES_DIR = join(QCP_HOME, "packages");
 export const LOCAL_QCP_DIR = ".qcp";
 export const LOCAL_SCHEMA_PATH = join(LOCAL_QCP_DIR, "schema.json");
 export const LOCAL_SCHEMA_CATALOG_PATH = join(QCP_HOME, "schemas.json");
+export const LOCAL_SEMANTIC_DB_PATH = join(QCP_HOME, "semantic.db");
 export const LOCAL_SUPPORT_DIR = join(LOCAL_QCP_DIR, "support");
 
 // ─── Schema ───────────────────────────────────────────────────────────────────

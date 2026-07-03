@@ -1,5 +1,12 @@
 import type { ToolsInput } from "@mastra/core/agent";
 import type { AuditContext } from "@/logger/audit.js";
+import {
+	CliSemanticQuestionAdapter,
+	HumanSemanticQuestionService,
+	McpSemanticQuestionAdapter,
+} from "@/semantic/question-service.js";
+import { SemanticStore, semanticStoreExists } from "@/semantic/store.js";
+import { createSemanticTools } from "@/semantic/tools.js";
 import type { DatabaseSchema, QcpConfig } from "@/types/index.js";
 import type { AbstractDatabaseAgent } from "./database-agent.js";
 import {
@@ -17,8 +24,10 @@ export interface CreateProviderDatabaseAgentOptions {
 	readonly config: QcpConfig;
 	readonly databaseUrl: string;
 	readonly schema: DatabaseSchema;
+	readonly connectionId?: string;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
 	readonly auditContext?: AuditContext;
+	readonly semanticInteractive?: boolean;
 	readonly tools?: ToolsInput;
 }
 
@@ -33,6 +42,7 @@ export async function createProviderDatabaseAgent(
 	options: CreateProviderDatabaseAgentOptions,
 ): Promise<ProviderDatabaseAgent> {
 	const model = createMastraModelConfig(options.config);
+	const semanticTools = await createProviderSemanticTools(options);
 	const tools = {
 		...createDatabaseTools({
 			databaseUrl: options.databaseUrl,
@@ -41,6 +51,7 @@ export async function createProviderDatabaseAgent(
 			approvalHandler: options.approvalHandler,
 			auditContext: options.auditContext,
 		}),
+		...semanticTools,
 		...(options.tools ?? {}),
 	};
 
@@ -128,6 +139,34 @@ export async function createProviderDatabaseAgent(
 			return _exhaustive;
 		}
 	}
+}
+
+async function createProviderSemanticTools(
+	options: CreateProviderDatabaseAgentOptions,
+): Promise<ToolsInput> {
+	if (!options.connectionId || !semanticStoreExists()) return {};
+
+	const store = new SemanticStore();
+	const hasState = await store.hasConnectionState(options.connectionId);
+	if (!hasState) {
+		await store.close();
+		return {};
+	}
+
+	const questionService = new HumanSemanticQuestionService({
+		store,
+		cliAdapter: options.semanticInteractive
+			? new CliSemanticQuestionAdapter({ interactive: true })
+			: undefined,
+		mcpAdapter: new McpSemanticQuestionAdapter(),
+	});
+
+	return createSemanticTools({
+		store,
+		connectionId: options.connectionId,
+		questionService,
+		auditContext: options.auditContext,
+	});
 }
 
 export function isProviderDatabaseAgent(

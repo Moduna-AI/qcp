@@ -26,6 +26,7 @@ ${chalk.bold("Quick start:")}
   ${chalk.cyan("qcp auth")}                       Set up your AI provider API key
   ${chalk.cyan("qcp connect")}                    Connect to your database
   ${chalk.cyan("qcp schema scan")}                Index your database schema
+  ${chalk.cyan("qcp semantic enrich")}            Add business meaning to schema objects
   ${chalk.cyan("qcp ask")} ${chalk.dim('"Your question"')}       Query in plain English
   ${chalk.cyan("qcp chat")}                       Start interactive assistant mode
 
@@ -233,6 +234,104 @@ schema
 	.action(async (options: { database?: string; all?: boolean }) => {
 		const { schemaInfoCommand } = await import("../commands/schema.js");
 		schemaInfoCommand({ database: options.database, all: options.all });
+	});
+
+// ─── semantic ────────────────────────────────────────────────────────────────
+
+const semantic = program
+	.command("semantic")
+	.description("Manage local semantic schema enrichment");
+
+semantic
+	.command("scan")
+	.description("Sync schema objects into ~/.qcp/semantic.db")
+	.option("--database <alias>", "Scan a specific configured database")
+	.option("--verbose", "Show additional sync details")
+	.action(async (options: { database?: string; verbose?: boolean }) => {
+		const { semanticScanCommand } = await import("../commands/semantic.js");
+		await semanticScanCommand({
+			database: options.database,
+			verbose: options.verbose,
+		});
+	});
+
+semantic
+	.command("status")
+	.description("Show semantic enrichment coverage and stale objects")
+	.option(
+		"--database <alias>",
+		"Show status for a specific configured database",
+	)
+	.action(async (options: { database?: string }) => {
+		const { semanticStatusCommand } = await import("../commands/semantic.js");
+		await semanticStatusCommand({ database: options.database });
+	});
+
+semantic
+	.command("enrich")
+	.description("Interactively annotate tables and columns")
+	.option("--database <alias>", "Annotate a specific configured database")
+	.option("--table <table>", "Limit enrichment to a table or schema.table")
+	.option("--column <column>", "Limit enrichment to a column")
+	.option("--force", "Re-annotate already enriched objects")
+	.action(
+		async (options: {
+			database?: string;
+			table?: string;
+			column?: string;
+			force?: boolean;
+		}) => {
+			const { semanticEnrichCommand } = await import("../commands/semantic.js");
+			await semanticEnrichCommand({
+				database: options.database,
+				table: options.table,
+				column: options.column,
+				force: options.force,
+			});
+		},
+	);
+
+semantic
+	.command("profile <table>")
+	.description("Opt in to bounded value profiling for a selected table")
+	.option("--database <alias>", "Profile a specific configured database")
+	.option(
+		"--column <column>",
+		"Profile one column; repeat to profile multiple columns",
+		(value: string, previous: string[]) => [...previous, value],
+		[],
+	)
+	.option("--include-sensitive", "Allow profiling sensitive-pattern columns")
+	.option("--limit <count>", "Maximum values to store per column", parseInt)
+	.action(
+		async (
+			table: string,
+			options: {
+				database?: string;
+				column?: string[];
+				includeSensitive?: boolean;
+				limit?: number;
+			},
+		) => {
+			const { semanticProfileCommand } = await import(
+				"../commands/semantic.js"
+			);
+			await semanticProfileCommand(table, {
+				database: options.database,
+				columns: options.column,
+				includeSensitive: options.includeSensitive,
+				limit: options.limit,
+			});
+		},
+	);
+
+semantic
+	.command("mcp")
+	.description("Start qcp semantic MCP server over stdio")
+	.option("--database <alias>", "Serve semantic tools for a specific database")
+	.action(async (options: { database?: string }) => {
+		const { semanticMcpCommand } = await import("../commands/semantic.js");
+		await semanticMcpCommand({ database: options.database });
 	});
 
 // ─── ask ──────────────────────────────────────────────────────────────────────

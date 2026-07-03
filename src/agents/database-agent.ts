@@ -72,6 +72,8 @@ export abstract class AbstractDatabaseAgent<TAgentId extends string = string> {
 			"Translate user requests into accurate database operations only when enough schema and context are available.",
 			"Prefer read-only exploration by default. Do not perform destructive or data-changing operations unless an explicitly provided tool and user instruction allow it.",
 			"Use available schema, metadata, and query tools before guessing table names, columns, relationships, or database capabilities.",
+			"When qcp_read_semantic_context is available, use it before writing SQL for business-language questions. Treat semantic context as advisory meaning only; validate and execute SQL against the actual database schema tools.",
+			"If semantic context reports missing enrichment, ask for enrichment with qcp_request_schema_enrichment when interactive tools are available, or state the missing meaning instead of inventing business definitions.",
 			"When producing SQL, explain the intent clearly and keep queries scoped, efficient, and safe.",
 			"When summarizing results, answer the user directly and call out relevant assumptions, empty results, or limitations.",
 		];

@@ -20,6 +20,14 @@ export const PACKAGE_GROUPS = {
 		description: "Neon MCP docs context for Neon Postgres connections",
 		packages: ["@mastra/mcp"] as const,
 	},
+	semantic: {
+		description: "Local SQLite/libSQL semantic schema cache",
+		packages: ["@libsql/client"] as const,
+	},
+	"semantic-mcp": {
+		description: "Mastra MCP server runtime for qcp semantic tools",
+		packages: ["@mastra/mcp"] as const,
+	},
 	"provider-gemini": {
 		description: "Google Gemini SDK",
 		packages: ["@google/generative-ai"] as const,
@@ -261,7 +269,9 @@ export async function importPackageFromStore<TModule>(
 	packageName: string,
 	targetDir = QCP_PACKAGES_DIR,
 ): Promise<TModule> {
-	const resolved = resolveAvailablePackage(packageName, targetDir);
+	const resolved =
+		resolvePackageEntryPoint(packageName, targetDir) ??
+		resolveAvailablePackage(packageName, targetDir);
 	return (await import(resolved)) as TModule;
 }
 
@@ -325,15 +335,26 @@ function getExportEntryPoint(exportsField: unknown): string | null {
 	const rootExport = exportsField["."];
 	if (typeof rootExport === "string") return stripRelativePrefix(rootExport);
 	if (isRecord(rootExport)) {
-		for (const key of ["import", "default", "module", "require"]) {
-			const value = rootExport[key];
-			if (typeof value === "string") return stripRelativePrefix(value);
-		}
+		const value = getConditionalExportEntryPoint(rootExport);
+		if (value) return value;
 	}
 
-	for (const key of ["import", "default", "module", "require"]) {
+	const value = getConditionalExportEntryPoint(exportsField);
+	if (value) return value;
+
+	return null;
+}
+
+function getConditionalExportEntryPoint(
+	exportsField: Record<string, unknown>,
+): string | null {
+	for (const key of ["import", "default", "module", "node", "require"]) {
 		const value = exportsField[key];
 		if (typeof value === "string") return stripRelativePrefix(value);
+		if (isRecord(value)) {
+			const nested = getConditionalExportEntryPoint(value);
+			if (nested) return nested;
+		}
 	}
 
 	return null;

@@ -106,10 +106,14 @@ qcp connect
 # 3. Index your schema (runs locally — no data leaves your machine)
 qcp schema scan
 
-# 4. Ask a question
+# 4. Optional: add business meaning for tables/columns
+qcp semantic scan
+qcp semantic enrich
+
+# 5. Ask a question
 qcp ask "Which products have the lowest inventory?"
 
-# 5. Or start an interactive session
+# 6. Or start an interactive session
 qcp chat
 ```
 
@@ -130,6 +134,11 @@ qcp chat
 | `qcp db edit <alias>` | Modify a connection and refresh its schema |
 | `qcp db remove <alias>` | Remove a connection and its cached schema |
 | `qcp schema scan` | Index the database schema locally |
+| `qcp semantic scan` | Sync schema objects into the local semantic store |
+| `qcp semantic status` | Show semantic enrichment coverage and stale objects |
+| `qcp semantic enrich` | Interactively annotate tables and columns |
+| `qcp semantic profile <table>` | Opt in to bounded value profiling for selected columns |
+| `qcp semantic mcp` | Start the qcp semantic MCP server over stdio |
 | `qcp ask "<question>"` | Query your database in plain English |
 | `qcp chat` | Start interactive multi-question session |
 | `qcp explain "<question>"` | Generate SQL without executing it |
@@ -168,7 +177,23 @@ qcp db edit production --type neon postgres://readonly_user:password@host/db
 qcp db remove production --yes
 ```
 
-Database connections are stored in `~/.qcp/config.json`; schema indexes are stored in `~/.qcp/schemas.json`. Successful `connect` and `db edit` runs test the final connection URL and refresh the schema index. Removing a database also removes its cached schema entry.
+Database connections are stored in `~/.qcp/config.json`; structural schema indexes are stored in `~/.qcp/schemas.json`; semantic enrichment is stored locally in `~/.qcp/semantic.db`. Successful `connect` and `db edit` runs test the final connection URL and refresh the schema index. Removing a database also removes its cached schema entry.
+
+### Semantic Layer
+
+```bash
+qcp semantic scan                 # Sync structural objects into ~/.qcp/semantic.db
+qcp semantic status               # Show enrichment coverage and stale objects
+qcp semantic enrich               # Annotate missing tables/columns interactively
+qcp semantic enrich --table users # Limit enrichment to one table
+qcp semantic enrich --force       # Add a new annotation version
+qcp semantic profile users --column status
+qcp semantic mcp                  # Expose semantic tools over Mastra MCP stdio
+```
+
+The semantic layer stores human-authored descriptions, business names, synonyms, relationship notes, and optional value profiles. `qcp ask` and `qcp chat` use this context when available, but SQL validation and execution still run against the full structural schema.
+
+Normal semantic scans are structure-only. Value-level context is opt-in through `qcp semantic profile`; profiling uses bounded read-only queries, skips sensitive-pattern columns by default, truncates stored values, and stores only local summaries.
 
 ### Diagnostics
 
@@ -295,7 +320,7 @@ For more detail, see [SECURITY.md](SECURITY.md).
 
 qcp has two different data flows:
 
-1. **LLM provider flow** — To generate SQL and summaries, qcp sends your question and local schema context to your configured provider unless you use a local provider such as Ollama. Query results may be sent to the configured provider for summarization.
+1. **LLM provider flow** — To generate SQL and summaries, qcp sends your question, local structural schema context, and any relevant local semantic annotations to your configured provider unless you use a local provider such as Ollama. Query results may be sent to the configured provider for summarization.
 2. **Telemetry flow** — Anonymous product telemetry is separate and intentionally excludes database content.
 
 ### What qcp sends to telemetry (PostHog)
@@ -320,7 +345,11 @@ qcp telemetry off
 
 ### Schema scanning
 
-`qcp schema scan` reads **structure only** — table names, column names, types, and relationships. It never reads row data. The schema is stored locally in `.qcp/schema.json`. When you ask questions with a hosted LLM provider, qcp may send relevant schema context to that configured provider so it can generate SQL.
+`qcp schema scan` reads **structure only** — table names, column names, types, and relationships. It never reads row data. The schema catalog is stored locally in `~/.qcp/schemas.json`.
+
+`qcp semantic scan` also remains structure-only. Human annotations are stored in `~/.qcp/semantic.db`. `qcp semantic profile` is the only semantic command that reads values, and it must be invoked for selected tables/columns; it skips sensitive-pattern columns by default and stores truncated local summaries.
+
+When you ask questions with a hosted LLM provider, qcp may send relevant structural schema context and relevant semantic annotations to that configured provider so it can generate SQL.
 
 ### Logs and support bundles
 
@@ -399,6 +428,7 @@ src/
   llm/          LLM provider abstraction + streaming
   safety/       AST-based SQL validation
   schema/       Schema introspection + context builder
+  semantic/     Local semantic schema enrichment, retrieval, profiling, MCP tools
   telemetry/    PostHog (privacy-safe)
   logger/       Winston file logger
   output/       Terminal formatting (chalk, cli-table3)
