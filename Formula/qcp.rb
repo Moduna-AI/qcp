@@ -1,20 +1,18 @@
 # typed: false
 # frozen_string_literal: true
 
-# To tap from the main repo:
-#   brew tap Moduna-AI/qcp https://github.com/Moduna-AI/qcp
+# To tap from the Homebrew tap repo:
+#   brew tap Moduna-AI/qcp https://github.com/Moduna-AI/homebrew-qcp
 #   brew install qcp
 #
 # For HEAD builds (local development / pre-release):
 #   brew install --HEAD Moduna-AI/qcp/qcp
 
-HOMEBREW_VERSION = $(jq -r '.version' package.json)
-
 class Qcp < Formula
   desc "AI-powered CLI for querying PostgreSQL in natural language"
   homepage "https://github.com/Moduna-AI/qcp"
   license "MIT"
-  version HOMEBREW_VERSION
+  version "0.2.1"
 
   head "https://github.com/Moduna-AI/qcp.git", branch: "main"
 
