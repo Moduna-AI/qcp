@@ -1,15 +1,15 @@
 import inquirer from "inquirer";
 import ora from "ora";
+import type { ProviderName } from "@/types/index.js";
 import {
 	formatInstallCommand,
 	getPackageGroupStatus,
 	getPackageStoreDir,
 	installPackageGroup,
-	type PackageGroupStatus,
 	type PackageGroup,
+	type PackageGroupStatus,
 	providerPackageGroup,
 } from "./lazy-packages.js";
-import type { ProviderName } from "@/types/index.js";
 
 export interface PackageGroupsAudit {
 	readonly requiredGroups: readonly PackageGroup[];

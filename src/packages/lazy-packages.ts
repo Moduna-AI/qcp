@@ -314,7 +314,8 @@ function getPackageEntryPoint(manifest: PackageManifest): string | null {
 }
 
 function getExportEntryPoint(exportsField: unknown): string | null {
-	if (typeof exportsField === "string") return stripRelativePrefix(exportsField);
+	if (typeof exportsField === "string")
+		return stripRelativePrefix(exportsField);
 	if (!isRecord(exportsField)) return null;
 
 	const rootExport = exportsField["."];
