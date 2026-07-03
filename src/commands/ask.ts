@@ -1,6 +1,6 @@
 import inquirer from "inquirer";
 import ora from "ora";
-import { QcpSupervisorAgent } from "@/agents/index.js";
+import type { QcpSupervisorAgent } from "@/agents/supervisor-agent.js";
 import {
 	ensureConfigDir,
 	getActiveDatabaseConnection,
@@ -17,6 +17,15 @@ import {
 	printQuestion,
 	printSummary,
 } from "@/output/index.js";
+import {
+	type PackageGroup,
+	providerPackageGroup,
+} from "@/packages/lazy-packages.js";
+import {
+	auditPackageGroups,
+	ensurePackageGroups,
+	type PackageGroupsAudit,
+} from "@/packages/runtime.js";
 import { classifyPromptViolation } from "@/safety/index.js";
 import { loadSchemaForConnection, schemaToContext } from "@/schema/index.js";
 import {
@@ -82,7 +91,18 @@ export async function askCommand(
 	// ── Create supervisor agent ───────────────────────────────────────────────────
 	let supervisor: QcpSupervisorAgent;
 	try {
-		supervisor = new QcpSupervisorAgent({
+		const packageAudit = auditAskRuntimePackages(activeConfig);
+		if (packageAudit.missingGroups.length > 0) {
+			await ensurePackageGroups({
+				commandName: "qcp ask",
+				groups: packageAudit.missingGroups,
+				verbose: options.verbose || options.debug,
+			});
+		}
+		const { QcpSupervisorAgent } = await import(
+			"../agents/supervisor-agent.js"
+		);
+		supervisor = await QcpSupervisorAgent.create({
 			config: activeConfig,
 			command: "ask",
 			connectionId: connection.id,
@@ -160,6 +180,24 @@ export async function askCommand(
 	}
 
 	await shutdownTelemetry();
+}
+
+function getAskRuntimePackageGroups(
+	config: ReturnType<typeof loadConfig>,
+): PackageGroup[] {
+	const groups: PackageGroup[] = [
+		"agent",
+		providerPackageGroup(config.provider),
+	];
+	if (config.databaseType === "prisma-postgres") groups.push("prisma");
+	return groups;
+}
+
+export function auditAskRuntimePackages(
+	config: ReturnType<typeof loadConfig>,
+	targetDir?: string,
+): PackageGroupsAudit {
+	return auditPackageGroups(getAskRuntimePackageGroups(config), targetDir);
 }
 
 async function confirmAskToolExecution(

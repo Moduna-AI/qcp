@@ -19,6 +19,10 @@ import {
 	printSection,
 	printSql,
 } from "@/output/index.js";
+import {
+	auditProviderRuntimePackages,
+	ensurePackageGroups,
+} from "@/packages/runtime.js";
 import { classifyPromptViolation, validateSql } from "@/safety/index.js";
 import { loadSchemaForConnection } from "@/schema/index.js";
 import {
@@ -68,7 +72,14 @@ export async function explainCommand(
 	// ── Create provider ─────────────────────────────────────────────────────────
 	let provider: LLMProvider;
 	try {
-		provider = createProvider(activeConfig);
+		const packageAudit = auditProviderRuntimePackages(activeConfig.provider);
+		if (packageAudit.missingGroups.length > 0) {
+			await ensurePackageGroups({
+				commandName: "qcp explain",
+				groups: packageAudit.missingGroups,
+			});
+		}
+		provider = await createProvider(activeConfig);
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
 		printError(message);

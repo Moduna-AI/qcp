@@ -11,7 +11,7 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 import ora from "ora";
 import { v7 as uuidv7 } from "uuid";
-import { QcpSupervisorAgent } from "@/agents/index.js";
+import type { QcpSupervisorAgent } from "@/agents/supervisor-agent.js";
 import {
 	getActiveDatabaseConnection,
 	loadConfig,
@@ -26,6 +26,15 @@ import {
 	printPromptViolation,
 	printSection,
 } from "@/output/index.js";
+import {
+	type PackageGroup,
+	providerPackageGroup,
+} from "@/packages/lazy-packages.js";
+import {
+	auditPackageGroups,
+	ensurePackageGroups,
+	type PackageGroupsAudit,
+} from "@/packages/runtime.js";
 import {
 	classifyPromptViolation,
 	sanitizeSensitiveData,
@@ -119,17 +128,36 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 	console.log();
 
 	const sessionId = uuidv7();
-	const supervisor = new QcpSupervisorAgent({
-		config: activeConfig,
-		command: "chat",
-		sessionId,
-		connectionId: connection.id,
-		connectionName: connection.name,
-		databaseUrl: connection.databaseUrl,
-		schema,
-		approvalHandler: async (reasons, sql) =>
-			confirmChatToolExecution(reasons, sql, activeConfig, options),
-	});
+	let supervisor: QcpSupervisorAgent;
+	try {
+		const packageAudit = auditChatRuntimePackages(activeConfig);
+		if (packageAudit.missingGroups.length > 0) {
+			await ensurePackageGroups({
+				commandName: "qcp chat",
+				groups: packageAudit.missingGroups,
+			});
+		}
+		const { QcpSupervisorAgent } = await import(
+			"../agents/supervisor-agent.js"
+		);
+		supervisor = await QcpSupervisorAgent.create({
+			config: activeConfig,
+			command: "chat",
+			sessionId,
+			connectionId: connection.id,
+			connectionName: connection.name,
+			databaseUrl: connection.databaseUrl,
+			schema,
+			approvalHandler: async (reasons, sql) =>
+				confirmChatToolExecution(reasons, sql, activeConfig, options),
+		});
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		printError(message);
+		trackError("chat", "provider_init_failed");
+		await shutdownTelemetry();
+		process.exit(1);
+	}
 
 	const session: ChatSession = {
 		connectionName: connection.name,
@@ -203,6 +231,24 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 
 	rl.close();
 	await shutdownTelemetry();
+}
+
+function getChatRuntimePackageGroups(
+	config: ReturnType<typeof loadConfig>,
+): PackageGroup[] {
+	const groups: PackageGroup[] = [
+		"agent",
+		providerPackageGroup(config.provider),
+	];
+	if (config.databaseType === "prisma-postgres") groups.push("prisma");
+	return groups;
+}
+
+export function auditChatRuntimePackages(
+	config: ReturnType<typeof loadConfig>,
+	targetDir?: string,
+): PackageGroupsAudit {
+	return auditPackageGroups(getChatRuntimePackageGroups(config), targetDir);
 }
 
 // ─── Question handler ──────────────────────────────────────────────────────────

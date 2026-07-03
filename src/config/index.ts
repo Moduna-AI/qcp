@@ -18,6 +18,7 @@ import { DatabaseConnectionRegistry } from "./database-connection-registry.js";
 export const QCP_HOME = join(homedir(), ".qcp");
 export const CONFIG_PATH = join(QCP_HOME, "config.json");
 export const LOGS_DIR = join(QCP_HOME, "logs");
+export const QCP_PACKAGES_DIR = join(QCP_HOME, "packages");
 export const LOCAL_QCP_DIR = ".qcp";
 export const LOCAL_SCHEMA_PATH = join(LOCAL_QCP_DIR, "schema.json");
 export const LOCAL_SCHEMA_CATALOG_PATH = join(QCP_HOME, "schemas.json");

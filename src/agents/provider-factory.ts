@@ -7,11 +7,11 @@ import {
 	type DatabaseToolApprovalHandler,
 } from "./database-tools.js";
 import { createMastraModelConfig } from "./model-config.js";
-import { NeonAgent } from "./neon-agent.js";
-import { OraclePostgresAgent } from "./oracle-postgres-agent.js";
-import { PostgresAgent } from "./postgres-agent.js";
-import { PrismaAgent } from "./prisma-agent.js";
-import { SupabaseAgent } from "./supabase-agent.js";
+import type { NeonAgent } from "./neon-agent.js";
+import type { OraclePostgresAgent } from "./oracle-postgres-agent.js";
+import type { PostgresAgent } from "./postgres-agent.js";
+import type { PrismaAgent } from "./prisma-agent.js";
+import type { SupabaseAgent } from "./supabase-agent.js";
 
 export interface CreateProviderDatabaseAgentOptions {
 	readonly config: QcpConfig;
@@ -29,9 +29,9 @@ export type ProviderDatabaseAgent =
 	| SupabaseAgent<"qcp-supabase-agent">
 	| OraclePostgresAgent<"qcp-oracle-postgres-agent">;
 
-export function createProviderDatabaseAgent(
+export async function createProviderDatabaseAgent(
 	options: CreateProviderDatabaseAgentOptions,
-): ProviderDatabaseAgent {
+): Promise<ProviderDatabaseAgent> {
 	const model = createMastraModelConfig(options.config);
 	const tools = {
 		...createDatabaseTools({
@@ -45,7 +45,8 @@ export function createProviderDatabaseAgent(
 	};
 
 	switch (options.config.databaseType) {
-		case "prisma-postgres":
+		case "prisma-postgres": {
+			const { PrismaAgent } = await import("./prisma-agent.js");
 			return new PrismaAgent({
 				id: "qcp-prisma-agent",
 				name: "QCP Prisma Database Agent",
@@ -60,7 +61,9 @@ export function createProviderDatabaseAgent(
 				auditContext: options.auditContext,
 				tools,
 			});
-		case "neon":
+		}
+		case "neon": {
+			const { NeonAgent } = await import("./neon-agent.js");
 			return new NeonAgent({
 				id: "qcp-neon-agent",
 				name: "QCP Neon Database Agent",
@@ -69,7 +72,9 @@ export function createProviderDatabaseAgent(
 				model,
 				tools,
 			});
-		case "supabase":
+		}
+		case "supabase": {
+			const { SupabaseAgent } = await import("./supabase-agent.js");
 			return new SupabaseAgent({
 				id: "qcp-supabase-agent",
 				name: "QCP Supabase Database Agent",
@@ -83,7 +88,11 @@ export function createProviderDatabaseAgent(
 				auditContext: options.auditContext,
 				tools,
 			});
-		case "oracle-postgres":
+		}
+		case "oracle-postgres": {
+			const { OraclePostgresAgent } = await import(
+				"./oracle-postgres-agent.js"
+			);
 			return new OraclePostgresAgent({
 				id: "qcp-oracle-postgres-agent",
 				name: "QCP Oracle PostgreSQL Agent",
@@ -92,7 +101,9 @@ export function createProviderDatabaseAgent(
 				model,
 				tools,
 			});
-		case "other-postgres":
+		}
+		case "other-postgres": {
+			const { PostgresAgent } = await import("./postgres-agent.js");
 			return new PostgresAgent({
 				id: "qcp-postgres-agent",
 				name: "QCP PostgreSQL Database Agent",
@@ -101,6 +112,7 @@ export function createProviderDatabaseAgent(
 				model,
 				tools,
 			});
+		}
 		default: {
 			const _exhaustive: never = options.config.databaseType;
 			return _exhaustive;

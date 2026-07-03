@@ -247,7 +247,7 @@ describe("Prisma agent tools", () => {
 	});
 
 	test("falls back cleanly when Prisma MCP tools cannot load", async () => {
-		const result = await loadPrismaMcpToolsets("postgres://example", () =>
+		const result = await loadPrismaMcpToolsets("postgres://example", async () =>
 			failingMcpClient("startup failed"),
 		);
 

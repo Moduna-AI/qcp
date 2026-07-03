@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ToolsetsInput, ToolsInput } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
-import { MCPClient } from "@mastra/mcp";
 import { z } from "zod";
 import { executeQuery, explainQuery } from "@/db/index.js";
 import { extractSqlAndExplanation } from "@/llm/prompts.js";
 import type { AuditContext } from "@/logger/audit.js";
+import {
+	getPackageStoreDir,
+	importPackageFromStore,
+} from "@/packages/lazy-packages.js";
 import {
 	enforceTenantIsolation,
 	getApprovalReasons,
@@ -533,7 +537,7 @@ export interface PrismaMcpToolsetsClient {
 
 export type PrismaMcpToolsetsClientFactory = (
 	databaseUrl: string,
-) => PrismaMcpToolsetsClient;
+) => Promise<PrismaMcpToolsetsClient>;
 
 export async function loadPrismaMcpToolsets(
 	databaseUrl: string,
@@ -542,7 +546,7 @@ export async function loadPrismaMcpToolsets(
 	let client: PrismaMcpToolsetsClient | null = null;
 
 	try {
-		client = clientFactory(databaseUrl);
+		client = await clientFactory(databaseUrl);
 		const { toolsets, errors } = await client.listToolsetsWithErrors();
 		return {
 			toolsets,
@@ -563,12 +567,15 @@ export async function loadPrismaMcpToolsets(
 	}
 }
 
-function createPrismaMcpClient(databaseUrl: string): PrismaMcpToolsetsClient {
+async function createPrismaMcpClient(
+	databaseUrl: string,
+): Promise<PrismaMcpToolsetsClient> {
+	const { MCPClient } = await importPackageFromStore<McpModule>("@mastra/mcp");
 	return new MCPClient({
 		id: `qcp-prisma-${randomUUID()}`,
 		servers: {
 			prisma: {
-				command: "prisma",
+				command: prismaBinaryPath(),
 				args: ["mcp"],
 				env: {
 					...stringProcessEnv(),
@@ -581,6 +588,30 @@ function createPrismaMcpClient(databaseUrl: string): PrismaMcpToolsetsClient {
 		},
 		timeout: 15_000,
 	});
+}
+
+interface McpModule {
+	readonly MCPClient: new (config: {
+		readonly id: string;
+		readonly servers: Record<
+			string,
+			{
+				readonly command: string;
+				readonly args: readonly string[];
+				readonly env: Record<string, string>;
+				readonly forwardInstructions: boolean;
+				readonly requireToolApproval: (input: {
+					readonly annotations?: { readonly readOnlyHint?: boolean };
+				}) => boolean;
+			}
+		>;
+		readonly timeout: number;
+	}) => PrismaMcpToolsetsClient;
+}
+
+function prismaBinaryPath(): string {
+	const executable = process.platform === "win32" ? "prisma.cmd" : "prisma";
+	return join(getPackageStoreDir(), "node_modules", ".bin", executable);
 }
 
 export interface GeneratePrismaSqlOptions {
