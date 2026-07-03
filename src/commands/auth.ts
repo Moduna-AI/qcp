@@ -20,8 +20,10 @@ import {
 	printSection,
 	printSuccess,
 } from "@/output/index.js";
-import { providerPackageGroup } from "@/packages/lazy-packages.js";
-import { ensurePackageGroups } from "@/packages/runtime.js";
+import {
+	auditProviderRuntimePackages,
+	ensurePackageGroups,
+} from "@/packages/runtime.js";
 import { trackProviderSelected } from "@/telemetry/index.js";
 import type { ProviderName } from "@/types/index.js";
 
@@ -192,16 +194,20 @@ export async function authCommand(): Promise<void> {
 	saveConfig({ ...config, provider, model, apiKeys: updatedKeys });
 	trackProviderSelected(provider, model);
 
-	// ── Test connectivity ─────────────────────────────────────────────────────────
-	const spinner = ora(`Testing ${provider} connectivity...`).start();
-
 	const testConfig = { ...config, provider, model, apiKeys: updatedKeys };
+	let spinner: ReturnType<typeof ora> | null = null;
 
 	try {
-		await ensurePackageGroups({
-			commandName: "qcp auth",
-			groups: [providerPackageGroup(provider)],
-		});
+		const packageAudit = auditProviderRuntimePackages(provider);
+		if (packageAudit.missingGroups.length > 0) {
+			await ensurePackageGroups({
+				commandName: "qcp auth",
+				groups: packageAudit.missingGroups,
+			});
+		}
+
+		// ── Test connectivity ─────────────────────────────────────────────────────
+		spinner = ora(`Testing ${provider} connectivity...`).start();
 		const testProvider = await createProvider(testConfig);
 		const ok = await Promise.race([
 			testProvider.testConnectivity(),
@@ -225,7 +231,7 @@ export async function authCommand(): Promise<void> {
 		}
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
-		spinner.fail("Connectivity test failed");
+		spinner?.fail("Connectivity test failed");
 		printError(message);
 		printInfo("Your key has been saved. Run qcp doctor to diagnose.");
 		await auditAuthEvent(config.installId, "LOGIN_FAILED", "failure", {

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { PromptViolationError } from "@/llm/prompts.js";
 import type { DatabaseSchema, QcpConfig } from "@/types/index.js";
-import { getDirectChatAnswer, QcpSupervisorAgent } from "./supervisor-agent.js";
+import {
+	getDirectChatAnswer,
+	QcpSupervisorAgent,
+	QcpSupervisorAgentConfigurationError,
+} from "./supervisor-agent.js";
 
 const schema: DatabaseSchema = {
 	scannedAt: "2026-06-29T00:00:00.000Z",
@@ -57,6 +62,29 @@ describe("qcp supervisor agent", () => {
 		expect(response.direct).toBe(true);
 		expect(response.text).toContain("plain English");
 		expect(response.text).toContain("read-only query");
+	});
+
+	test("rejects unsafe prompts before model or database delegation", async () => {
+		const supervisor = await QcpSupervisorAgent.create({
+			config: configWithDatabaseType("other-postgres"),
+			databaseUrl: "postgres://example",
+			schema,
+		});
+
+		await expect(
+			supervisor.generateResponse("Delete all projects"),
+		).rejects.toBeInstanceOf(PromptViolationError);
+	});
+
+	test("requires create when no database agent is provided", () => {
+		expect(
+			() =>
+				new QcpSupervisorAgent({
+					config: configWithDatabaseType("other-postgres"),
+					databaseUrl: "postgres://example",
+					schema,
+				}),
+		).toThrow(QcpSupervisorAgentConfigurationError);
 	});
 
 	test("summarizes known tables directly", () => {

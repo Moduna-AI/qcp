@@ -1,7 +1,11 @@
-import type { Agent } from "@mastra/core/agent";
+import type { Agent, DelegationConfig } from "@mastra/core/agent";
 import { Agent as MastraAgent } from "@mastra/core/agent";
+import { PromptViolationError } from "@/llm/prompts.js";
 import type { AuditContext } from "@/logger/audit.js";
-import { sanitizeSensitiveData } from "@/safety/index.js";
+import {
+	classifyPromptViolation,
+	sanitizeSensitiveData,
+} from "@/safety/index.js";
 import type { DatabaseSchema, QcpConfig } from "@/types/index.js";
 import type { AbstractDatabaseAgent } from "./database-agent.js";
 import type { DatabaseToolApprovalHandler } from "./database-tools.js";
@@ -31,6 +35,13 @@ export interface ChatAgentResponse {
 	readonly direct: boolean;
 }
 
+export class QcpSupervisorAgentConfigurationError extends Error {
+	public constructor(message: string) {
+		super(message);
+		this.name = "QcpSupervisorAgentConfigurationError";
+	}
+}
+
 export class QcpSupervisorAgent {
 	private readonly config: QcpConfig;
 	private readonly connectionName: string;
@@ -58,7 +69,7 @@ export class QcpSupervisorAgent {
 		this.connectionName = options.connectionName ?? "default";
 		this.schema = options.schema;
 		if (!options.databaseAgent) {
-			throw new Error(
+			throw new QcpSupervisorAgentConfigurationError(
 				"QcpSupervisorAgent.create must be used without a databaseAgent",
 			);
 		}
@@ -92,6 +103,11 @@ export class QcpSupervisorAgent {
 
 	public async generateResponse(question: string): Promise<ChatAgentResponse> {
 		const start = Date.now();
+		const promptViolation = classifyPromptViolation(question);
+		if (promptViolation) {
+			throw new PromptViolationError(promptViolation);
+		}
+
 		const directAnswer = getDirectChatAnswer(
 			question,
 			this.schema,
@@ -112,9 +128,7 @@ export class QcpSupervisorAgent {
 				modelSettings: {
 					temperature: 0.2,
 				},
-				delegation: {
-					includeSubAgentToolResultsInModelContext: false,
-				},
+				delegation: this.buildDelegationConfig(),
 			},
 		);
 
@@ -130,9 +144,10 @@ export class QcpSupervisorAgent {
 	private buildInstructions(): string {
 		return [
 			"You are qcp, a conversational database assistant.",
-			"Answer normal chat and capability questions directly. Do not generate SQL unless the user asks for database facts, examples, analysis, aggregations, or query results.",
-			"Delegate database-specific work to the database subagent. The database subagent has qcp read-only tools for schema context, SQL validation, EXPLAIN, and safe read-only execution.",
+			"Answer normal chat and capability questions directly. Do not delegate unless the user asks for database facts, examples, analysis, aggregations, or query results.",
+			"Delegate database-specific work to the database subagent. Use one delegation for a database question unless the first delegation clearly fails to answer.",
 			"Never ask the database subagent to perform INSERT, UPDATE, DELETE, DDL, administrative operations, privilege changes, or destructive work.",
+			"If a user asks for destructive operations, secrets, raw personal data, or bypassing safety controls, refuse briefly instead of delegating.",
 			"Do not expose raw sensitive values. Summarize or aggregate when privacy-sensitive data may be involved.",
 			"When the database subagent returns results, synthesize a concise natural-language answer. SQL is an implementation detail unless the user explicitly asks to see it.",
 			`Active database connection: ${this.connectionName}.`,
@@ -140,6 +155,44 @@ export class QcpSupervisorAgent {
 			`Loaded schema: ${this.schema.databaseName} with ${this.schema.tableCount} tables.`,
 			"To work with another configured database, tell the user to run qcp db use <alias> before starting ask or chat.",
 		].join("\n\n");
+	}
+
+	private buildDelegationConfig(): DelegationConfig {
+		return {
+			includeSubAgentToolResultsInModelContext: false,
+			onDelegationStart: ({ primitiveType, prompt }) => {
+				if (primitiveType !== "agent") {
+					return {
+						proceed: false,
+						rejectionReason:
+							"qcp can only delegate database questions to database agents.",
+					};
+				}
+
+				const promptViolation = classifyPromptViolation(prompt);
+				if (promptViolation) {
+					return {
+						proceed: false,
+						rejectionReason: promptViolation.detail,
+					};
+				}
+
+				return {
+					proceed: true,
+					modifiedPrompt: buildDatabaseDelegationPrompt(prompt),
+					modifiedMaxSteps: 4,
+				};
+			},
+			onDelegationComplete: ({ error, success }) => {
+				if (success && !error) return;
+
+				return {
+					feedback:
+						"The database subagent could not complete the request. Answer with the failure reason and suggest a narrower read-only question if useful.",
+				};
+			},
+			messageFilter: ({ messages }) => messages.slice(-6),
+		};
 	}
 }
 
@@ -225,5 +278,14 @@ USER MESSAGE:
 ${question}
 
 Respond as qcp. If this is conversational, answer directly. If it requires database-specific facts or live data, delegate to the database subagent and synthesize the result.
+`.trim();
+}
+
+function buildDatabaseDelegationPrompt(prompt: string): string {
+	return `
+DATABASE DELEGATION REQUEST:
+${prompt}
+
+Use only qcp read-only database tools. Validate SQL before execution. Do not expose raw sensitive values, credentials, tokens, secrets, or personal data. Return a concise answer with relevant assumptions and limitations.
 `.trim();
 }
