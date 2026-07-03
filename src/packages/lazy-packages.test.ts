@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
 	formatInstallCommand,
 	getPackageGroupStatus,
+	importPackageFromStore,
 	installPackageGroup,
 	listPackageGroupStatuses,
 	MissingLazyPackageError,
@@ -57,6 +58,40 @@ function writeInstalledPackageWithoutStoreManifest(
 	writeFileSync(join(packageDir, "dist", "index.js"), "module.exports = {};\n");
 }
 
+function writeNestedExportPackage(store: string, packageName: string): void {
+	const packageDir = join(store, "node_modules", ...packageName.split("/"));
+	mkdirSync(packageDir, { recursive: true });
+	writeFileSync(
+		join(packageDir, "package.json"),
+		JSON.stringify({
+			name: packageName,
+			version: "1.0.0",
+			type: "module",
+			main: "lib-cjs/node.js",
+			exports: {
+				".": {
+					types: "./lib-esm/node.d.ts",
+					import: {
+						node: "./lib-esm/node.js",
+						default: "./lib-esm/node.js",
+					},
+					require: "./lib-cjs/node.js",
+				},
+			},
+		}),
+	);
+	mkdirSync(join(packageDir, "lib-esm"), { recursive: true });
+	mkdirSync(join(packageDir, "lib-cjs"), { recursive: true });
+	writeFileSync(
+		join(packageDir, "lib-esm", "node.js"),
+		"export const loadedFrom = 'esm';\n",
+	);
+	writeFileSync(
+		join(packageDir, "lib-cjs", "node.js"),
+		"exports.loadedFrom = 'cjs';\n",
+	);
+}
+
 describe("lazy package groups", () => {
 	test("maps providers to package groups", () => {
 		expect(providerPackageGroup("gemini")).toBe("provider-gemini");
@@ -87,6 +122,22 @@ describe("lazy package groups", () => {
 		status = getPackageGroupStatus("neon", store);
 		expect(status.installed).toBe(true);
 		expect(status.missingPackages).toEqual([]);
+	});
+
+	test("tracks semantic SQLite and MCP runtime groups", () => {
+		const store = tempStore();
+		expect(getPackageGroupStatus("semantic", store).missingPackages).toEqual([
+			"@libsql/client",
+		]);
+		expect(
+			getPackageGroupStatus("semantic-mcp", store).missingPackages,
+		).toEqual(["@mastra/mcp"]);
+
+		writeInstalledPackage(store, "@libsql/client");
+		writeInstalledPackage(store, "@mastra/mcp");
+
+		expect(getPackageGroupStatus("semantic", store).installed).toBe(true);
+		expect(getPackageGroupStatus("semantic-mcp", store).installed).toBe(true);
 	});
 
 	test("built-in groups are installed without npm packages", () => {
@@ -170,11 +221,25 @@ describe("lazy package groups", () => {
 		);
 	});
 
+	test("dynamic imports prefer nested ESM export conditions over CJS main", async () => {
+		const store = tempStore();
+		writeNestedExportPackage(store, "@libsql/client");
+
+		const module = await importPackageFromStore<{ loadedFrom: string }>(
+			"@libsql/client",
+			store,
+		);
+
+		expect(module.loadedFrom).toBe("esm");
+	});
+
 	test("lists all groups including telemetry and doctor bundle", () => {
 		const groups = listPackageGroupStatuses(tempStore()).map(
 			(status) => status.group,
 		);
 		expect(groups).toContain("neon");
+		expect(groups).toContain("semantic");
+		expect(groups).toContain("semantic-mcp");
 		expect(groups).toContain("telemetry");
 		expect(groups).toContain("doctor-bundle");
 		expect(groups).toContain("provider-ollama");

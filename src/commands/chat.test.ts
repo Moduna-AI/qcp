@@ -76,6 +76,27 @@ describe("chat runtime package audit", () => {
 		expect(audit.requiredGroups).toEqual(["agent", "provider-gemini", "neon"]);
 		expect(audit.missingGroups).toEqual(["neon"]);
 	});
+
+	test("adds semantic package group only when semantic state is enabled", () => {
+		const store = tempStore();
+		writeInstalledPackage(store, "@google/generative-ai");
+
+		const audit = auditChatRuntimePackages(
+			configWith({
+				provider: "gemini",
+				databaseType: "other-postgres",
+			}),
+			store,
+			true,
+		);
+
+		expect(audit.requiredGroups).toEqual([
+			"agent",
+			"provider-gemini",
+			"semantic",
+		]);
+		expect(audit.missingGroups).toEqual(["semantic"]);
+	});
 });
 
 function configWith(

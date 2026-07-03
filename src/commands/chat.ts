@@ -40,6 +40,7 @@ import {
 	sanitizeSensitiveData,
 } from "@/safety/index.js";
 import { loadSchemaForConnection } from "@/schema/index.js";
+import { semanticStoreExists } from "@/semantic/store.js";
 import {
 	initTelemetry,
 	shutdownTelemetry,
@@ -130,7 +131,11 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 	const sessionId = uuidv7();
 	let supervisor: QcpSupervisorAgent;
 	try {
-		const packageAudit = auditChatRuntimePackages(activeConfig);
+		const packageAudit = auditChatRuntimePackages(
+			activeConfig,
+			undefined,
+			semanticStoreExists(),
+		);
 		if (packageAudit.missingGroups.length > 0) {
 			await ensurePackageGroups({
 				commandName: "qcp chat",
@@ -150,6 +155,7 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 			schema,
 			approvalHandler: async (reasons, sql) =>
 				confirmChatToolExecution(reasons, sql, activeConfig, options),
+			semanticInteractive: shouldPromptForSemanticEnrichment(options),
 		});
 	} catch (err: unknown) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -235,6 +241,7 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 
 function getChatRuntimePackageGroups(
 	config: ReturnType<typeof loadConfig>,
+	semanticEnabled = false,
 ): PackageGroup[] {
 	const groups: PackageGroup[] = [
 		"agent",
@@ -242,14 +249,23 @@ function getChatRuntimePackageGroups(
 	];
 	if (config.databaseType === "prisma-postgres") groups.push("prisma");
 	if (config.databaseType === "neon") groups.push("neon");
+	if (semanticEnabled) groups.push("semantic");
 	return groups;
 }
 
 export function auditChatRuntimePackages(
 	config: ReturnType<typeof loadConfig>,
 	targetDir?: string,
+	semanticEnabled = false,
 ): PackageGroupsAudit {
-	return auditPackageGroups(getChatRuntimePackageGroups(config), targetDir);
+	return auditPackageGroups(
+		getChatRuntimePackageGroups(config, semanticEnabled),
+		targetDir,
+	);
+}
+
+function shouldPromptForSemanticEnrichment(options: ChatOptions): boolean {
+	return options.noConfirm !== true && process.stdin.isTTY === true;
 }
 
 // ─── Question handler ──────────────────────────────────────────────────────────

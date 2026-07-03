@@ -24,6 +24,7 @@ export interface QcpSupervisorAgentOptions {
 	readonly databaseUrl: string;
 	readonly schema: DatabaseSchema;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
+	readonly semanticInteractive?: boolean;
 	readonly databaseAgent?: ProviderDatabaseAgent;
 }
 
@@ -58,8 +59,10 @@ export class QcpSupervisorAgent {
 				config: options.config,
 				databaseUrl: options.databaseUrl,
 				schema: options.schema,
+				connectionId: options.connectionId,
 				approvalHandler: options.approvalHandler,
 				auditContext: buildSupervisorAuditContext(options),
+				semanticInteractive: options.semanticInteractive,
 			}));
 		return new QcpSupervisorAgent({ ...options, databaseAgent });
 	}
@@ -287,5 +290,7 @@ DATABASE DELEGATION REQUEST:
 ${prompt}
 
 Use only qcp read-only database tools. Validate SQL before execution. Do not expose raw sensitive values, credentials, tokens, secrets, or personal data. Return a concise answer with relevant assumptions and limitations.
+
+If semantic tools are available, retrieve semantic context before mapping business terms to tables or columns. Missing semantic enrichment is a limitation to report or request; do not invent business meaning.
 `.trim();
 }

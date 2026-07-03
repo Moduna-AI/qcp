@@ -28,6 +28,7 @@ import {
 } from "@/packages/runtime.js";
 import { classifyPromptViolation } from "@/safety/index.js";
 import { loadSchemaForConnection, schemaToContext } from "@/schema/index.js";
+import { semanticStoreExists } from "@/semantic/store.js";
 import {
 	initTelemetry,
 	shutdownTelemetry,
@@ -91,7 +92,11 @@ export async function askCommand(
 	// ── Create supervisor agent ───────────────────────────────────────────────────
 	let supervisor: QcpSupervisorAgent;
 	try {
-		const packageAudit = auditAskRuntimePackages(activeConfig);
+		const packageAudit = auditAskRuntimePackages(
+			activeConfig,
+			undefined,
+			semanticStoreExists(),
+		);
 		if (packageAudit.missingGroups.length > 0) {
 			await ensurePackageGroups({
 				commandName: "qcp ask",
@@ -111,6 +116,7 @@ export async function askCommand(
 			schema,
 			approvalHandler: async (reasons, sql) =>
 				confirmAskToolExecution(reasons, sql, activeConfig, options),
+			semanticInteractive: shouldPromptForSemanticEnrichment(options),
 		});
 		if (options.verbose || options.debug) {
 			printInfo(`Database: ${connection.name}`);
@@ -184,6 +190,7 @@ export async function askCommand(
 
 function getAskRuntimePackageGroups(
 	config: ReturnType<typeof loadConfig>,
+	semanticEnabled = false,
 ): PackageGroup[] {
 	const groups: PackageGroup[] = [
 		"agent",
@@ -191,14 +198,23 @@ function getAskRuntimePackageGroups(
 	];
 	if (config.databaseType === "prisma-postgres") groups.push("prisma");
 	if (config.databaseType === "neon") groups.push("neon");
+	if (semanticEnabled) groups.push("semantic");
 	return groups;
 }
 
 export function auditAskRuntimePackages(
 	config: ReturnType<typeof loadConfig>,
 	targetDir?: string,
+	semanticEnabled = false,
 ): PackageGroupsAudit {
-	return auditPackageGroups(getAskRuntimePackageGroups(config), targetDir);
+	return auditPackageGroups(
+		getAskRuntimePackageGroups(config, semanticEnabled),
+		targetDir,
+	);
+}
+
+function shouldPromptForSemanticEnrichment(options: AskOptions): boolean {
+	return options.noConfirm !== true && process.stdin.isTTY === true;
 }
 
 async function confirmAskToolExecution(

@@ -37,6 +37,9 @@ export type AuditAction =
 	| "APPROVAL_GRANTED"
 	| "APPROVAL_DENIED"
 	| "APPROVAL_REQUIRED"
+	| "SEMANTIC_SCAN"
+	| "SEMANTIC_ANNOTATION"
+	| "SEMANTIC_PROFILE"
 	| "AUDIT_INTEGRITY_FAILURE";
 
 export type AuditOutcome = "success" | "failure" | "rejected" | "cancelled";

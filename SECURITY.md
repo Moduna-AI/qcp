@@ -64,6 +64,16 @@ Scrubbing is a defense-in-depth layer. Do not use it as the only control for hig
 
 Raw database errors are not returned to the agent unchanged. qcp suppresses stack traces, raw SQL, and schema-revealing database messages in model-facing tool responses.
 
+### Semantic layer
+
+The semantic layer is local-first and advisory:
+
+- Structural schema remains stored in `~/.qcp/schemas.json`.
+- Human-authored semantic annotations are stored in `~/.qcp/semantic.db`.
+- `qcp semantic scan` is structure-only and does not read row values.
+- `qcp semantic profile` is opt-in per selected table/column, uses bounded read-only queries, skips sensitive-pattern columns by default, truncates stored values, and stores local summaries only.
+- Semantic context can help agents map business language to schema objects, but SQL validation and execution still use the full structural schema and the read-only safety pipeline.
+
 ## Privacy Model
 
 ### LLM provider data flow
@@ -72,6 +82,7 @@ To generate SQL and summaries, qcp sends data to the configured model provider. 
 
 - Your natural-language question
 - Locally scanned schema context
+- Relevant local semantic annotations, when configured
 - Generated SQL
 - Query results for summarization
 
@@ -84,6 +95,7 @@ Anonymous telemetry is separate from LLM provider calls. qcp telemetry does not 
 - SQL queries
 - Query results
 - Schema metadata
+- Semantic annotations or value profiles
 - Database URLs
 - Credentials
 - API keys or tokens
@@ -107,7 +119,7 @@ Use defense in depth:
 - Avoid granting access to secrets, credentials, raw tokens, payment data, or health data unless explicitly needed.
 - Keep `safeMode` enabled for interactive use.
 - Treat `--yes` as an automation-only option for trusted environments.
-- Review `.qcp/schema.json`, logs, and support bundles before sharing them.
+- Review `~/.qcp/schemas.json`, `~/.qcp/semantic.db`, logs, and support bundles before sharing them.
 - Rotate credentials if they may have been exposed in terminal output, shell history, or logs.
 
 ## Known Limits
@@ -115,6 +127,8 @@ Use defense in depth:
 qcp reduces risk; it does not make arbitrary database access risk-free.
 
 - Schema context and result summaries can be sent to the configured LLM provider.
+- Semantic annotations can be sent to the configured LLM provider when relevant to an ask/chat request.
+- Opt-in semantic value profiles are local summaries, but they may still reveal business-sensitive value names.
 - PII scrubbing is pattern-based and may not catch every sensitive value.
 - Tenant isolation currently supports conservative SQL shapes and rejects unsupported forms.
 - Database permissions remain the strongest boundary. Use least-privilege credentials.
