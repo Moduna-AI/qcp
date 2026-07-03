@@ -14,9 +14,40 @@ export interface UpsertDatabaseConnectionInput {
 	readonly prismaDatasourceName?: string;
 }
 
+export interface UpdateDatabaseConnectionInput {
+	readonly name?: string;
+	readonly databaseType?: DatabaseType;
+	readonly databaseUrl?: string;
+	readonly prismaSchemaPath?: string;
+	readonly prismaDatasourceName?: string;
+}
+
 export interface DatabaseConnectionRegistrySnapshot {
 	readonly connections: DatabaseConnectionConfig[];
 	readonly activeDatabaseId?: string;
+}
+
+export class InvalidDatabaseAliasError extends Error {
+	public constructor() {
+		super(
+			"Database alias must be 1-40 characters using lowercase letters, numbers, and hyphens.",
+		);
+		this.name = "InvalidDatabaseAliasError";
+	}
+}
+
+export class DatabaseConnectionNotFoundError extends Error {
+	public constructor(name: string) {
+		super(`Database connection not found: ${name}`);
+		this.name = "DatabaseConnectionNotFoundError";
+	}
+}
+
+export class DatabaseAliasConflictError extends Error {
+	public constructor(name: string) {
+		super(`Database connection already exists: ${name}`);
+		this.name = "DatabaseAliasConflictError";
+	}
 }
 
 export class DatabaseConnectionRegistry {
@@ -97,7 +128,7 @@ export class DatabaseConnectionRegistry {
 	public use(name: string): DatabaseConnectionRegistrySnapshot {
 		const connection = this.findByName(name);
 		if (!connection) {
-			throw new Error(`Database connection not found: ${name}`);
+			throw new DatabaseConnectionNotFoundError(name);
 		}
 
 		return {
@@ -106,10 +137,55 @@ export class DatabaseConnectionRegistry {
 		};
 	}
 
+	public update(
+		name: string,
+		input: UpdateDatabaseConnectionInput,
+		options: { readonly setActive?: boolean } = {},
+	): DatabaseConnectionRegistrySnapshot {
+		const normalizedName = normalizeDatabaseAlias(name);
+		const existing = this.findByName(normalizedName);
+		if (!existing) {
+			throw new DatabaseConnectionNotFoundError(normalizedName);
+		}
+
+		const nextName = input.name
+			? normalizeDatabaseAlias(input.name)
+			: existing.name;
+		const conflict = this.findByName(nextName);
+		if (conflict && conflict.id !== existing.id) {
+			throw new DatabaseAliasConflictError(nextName);
+		}
+
+		const databaseType = input.databaseType ?? existing.databaseType;
+		const connection: DatabaseConnectionConfig = {
+			...existing,
+			name: nextName,
+			databaseType,
+			databaseUrl: input.databaseUrl ?? existing.databaseUrl,
+			prismaSchemaPath:
+				databaseType === "prisma-postgres"
+					? (input.prismaSchemaPath ?? existing.prismaSchemaPath)
+					: undefined,
+			prismaDatasourceName:
+				databaseType === "prisma-postgres"
+					? (input.prismaDatasourceName ?? existing.prismaDatasourceName)
+					: undefined,
+			updatedAt: new Date().toISOString(),
+		};
+
+		return {
+			connections: this.connections.map((item) =>
+				item.id === existing.id ? connection : item,
+			),
+			activeDatabaseId:
+				options.setActive === true ? connection.id : this.activeDatabaseId,
+		};
+	}
+
 	public remove(name: string): DatabaseConnectionRegistrySnapshot {
 		const connection = this.findByName(name);
 		if (!connection) {
-			throw new Error(`Database connection not found: ${name}`);
+			throw new DatabaseConnectionNotFoundError(name);
 		}
 
 		const connections = this.connections.filter(
@@ -117,7 +193,7 @@ export class DatabaseConnectionRegistry {
 		);
 		const activeDatabaseId =
 			this.activeDatabaseId === connection.id
-				? connections[0]?.id
+				? [...connections].sort((a, b) => a.name.localeCompare(b.name))[0]?.id
 				: this.activeDatabaseId;
 
 		return {
@@ -130,9 +206,7 @@ export class DatabaseConnectionRegistry {
 export function normalizeDatabaseAlias(alias: string): string {
 	const normalized = alias.trim().toLowerCase();
 	if (!isValidDatabaseAlias(normalized)) {
-		throw new Error(
-			"Database alias must be 1-40 characters using lowercase letters, numbers, and hyphens.",
-		);
+		throw new InvalidDatabaseAliasError();
 	}
 
 	return normalized;
