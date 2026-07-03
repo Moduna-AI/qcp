@@ -94,28 +94,17 @@ jobs:
       - name: Checkout Homebrew Tap Repo
         uses: actions/checkout@v7
         with:
-          repository: ${{ github.repository }}
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }} 
+          repository: Moduna-AI/homebrew-qcp
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          ref: main
           path: 'tap-repo'
 
       - name: Compute Checksums and Update Remote Tap Formula
         shell: bash
         run: |
-          # 1. Detect the branch the tag was created from
-          git fetch --all
-          BRANCH=$(git branch -r --contains "$GITHUB_SHA" \
-            | grep -v HEAD \
-            | sed 's|.*origin/||' \
-            | xargs \
-            | awk '{print $1}')
+          RELEASE_VERSION="${GITHUB_REF#refs/tags/v}"
 
-          if [ -z "$BRANCH" ]; then
-            echo "Error: Could not determine source branch for $GITHUB_REF"
-            exit 1
-          fi
-          echo "Resolved source branch: $BRANCH"
-
-          # 2. Compute checksums
+          # 1. Compute checksums
           cd dist
           sha256sum qcp-* > checksums.txt
           cat checksums.txt
@@ -125,30 +114,30 @@ jobs:
           SHA_LINUX_ARM64=$(sha256sum qcp-linux-arm64 | awk '{print $1}')
           cd ..
 
-          # 3. Prepare tap-repo, checkout the detected branch
+          # 2. Prepare tap-repo
           cd tap-repo
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git fetch origin "$BRANCH"
-          git checkout "$BRANCH"
           cd ..
 
-          # 4. Update the formula
+          # 3. Update the formula
           FORMULA_PATH="tap-repo/Formula/qcp.rb"
 
           if [ -f "$FORMULA_PATH" ]; then
-            sed -i "/qcp-macos-arm64/{n;s/sha256 \".*\"/sha256 \"${SHA_MAC_ARM64}\"/}" $FORMULA_PATH
-            sed -i "/qcp-linux-x64/{n;s/sha256 \".*\"/sha256 \"${SHA_LINUX_X64}\"/}" $FORMULA_PATH
-            sed -i "/qcp-linux-arm64/{n;s/sha256 \".*\"/sha256 \"${SHA_LINUX_ARM64}\"/}" $FORMULA_PATH
+            sed -i '/^HOMEBREW_VERSION = /d' "$FORMULA_PATH"
+            sed -i -E "s/^  version .*/  version \"${RELEASE_VERSION}\"/" "$FORMULA_PATH"
+            sed -i "/qcp-macos-arm64/{n;s/sha256 \".*\"/sha256 \"${SHA_MAC_ARM64}\"/}" "$FORMULA_PATH"
+            sed -i "/qcp-linux-x64/{n;s/sha256 \".*\"/sha256 \"${SHA_LINUX_X64}\"/}" "$FORMULA_PATH"
+            sed -i "/qcp-linux-arm64/{n;s/sha256 \".*\"/sha256 \"${SHA_LINUX_ARM64}\"/}" "$FORMULA_PATH"
 
-            # 5. Commit and push to the same branch
+            # 4. Commit and push to the Homebrew tap
             cd tap-repo
+            ruby -c Formula/qcp.rb
             git add Formula/qcp.rb
 
             if ! git diff --cached --quiet; then
               git commit -m "chore: update qcp formula checksums for ${GITHUB_REF#refs/tags/}"
-              git push origin "$BRANCH"
+              git push origin HEAD:main
             else
               echo "Formula checksums are already identical. Skipping commit."
             fi
