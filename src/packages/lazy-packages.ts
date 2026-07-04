@@ -22,7 +22,7 @@ export const PACKAGE_GROUPS = {
 	},
 	semantic: {
 		description: "Local SQLite/libSQL semantic schema cache",
-		packages: ["@libsql/client"] as const,
+		packages: ["@libsql/client", "@libsql/core"] as const,
 	},
 	"semantic-mcp": {
 		description: "Mastra MCP server runtime for qcp semantic tools",
@@ -54,7 +54,7 @@ export const PACKAGE_GROUPS = {
 	},
 	"format-sqlite": {
 		description: "SQLite .db database transfer adapter",
-		packages: ["@libsql/client"] as const,
+		packages: ["@libsql/client", "@libsql/core"] as const,
 	},
 	"format-pandas": {
 		description: "Pandas pickle database transfer adapter",

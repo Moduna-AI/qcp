@@ -1,6 +1,6 @@
 {
 	"name": "@moduna/qcp",
-	"version": "0.2.7",
+	"version": "0.2.8",
 	"description": "AI-powered CLI for querying PostgreSQL in natural language",
 	"type": "module",
 	"main": "./dist/index.js",

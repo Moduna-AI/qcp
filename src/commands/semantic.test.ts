@@ -23,6 +23,7 @@ describe("qcp semantic command smoke tests", () => {
 		const home = tempHome();
 		writeConfigAndSchema(home);
 		seedRuntimePackage(home, "@libsql/client");
+		seedRuntimePackage(home, "@libsql/core");
 
 		const result = runQcp(home, [
 			"semantic",
@@ -42,6 +43,7 @@ describe("qcp semantic command smoke tests", () => {
 		const home = tempHome();
 		writeConfigAndSchema(home);
 		seedRuntimePackage(home, "@libsql/client");
+		seedRuntimePackage(home, "@libsql/core");
 
 		const result = runQcp(home, [
 			"semantic",

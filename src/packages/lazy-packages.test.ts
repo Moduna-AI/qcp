@@ -128,16 +128,28 @@ describe("lazy package groups", () => {
 		const store = tempStore();
 		expect(getPackageGroupStatus("semantic", store).missingPackages).toEqual([
 			"@libsql/client",
+			"@libsql/core",
 		]);
 		expect(
 			getPackageGroupStatus("semantic-mcp", store).missingPackages,
 		).toEqual(["@mastra/mcp"]);
 
 		writeInstalledPackage(store, "@libsql/client");
+		writeInstalledPackage(store, "@libsql/core");
 		writeInstalledPackage(store, "@mastra/mcp");
 
 		expect(getPackageGroupStatus("semantic", store).installed).toBe(true);
 		expect(getPackageGroupStatus("semantic-mcp", store).installed).toBe(true);
+	});
+
+	test("semantic SQLite group detects missing libSQL core runtime dependency", () => {
+		const store = tempStore();
+		writeNestedExportPackage(store, "@libsql/client");
+
+		const status = getPackageGroupStatus("semantic", store);
+
+		expect(status.installed).toBe(false);
+		expect(status.missingPackages).toEqual(["@libsql/core"]);
 	});
 
 	test("built-in groups are installed without npm packages", () => {
