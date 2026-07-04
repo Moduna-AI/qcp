@@ -42,6 +42,14 @@ import {
 import { loadSchemaForConnection } from "@/schema/index.js";
 import { semanticStoreExists } from "@/semantic/store.js";
 import {
+	resolveTransferIntent,
+	supportedTransferFormatChoices,
+} from "@/transfer/intent.js";
+import type {
+	DatabaseTransferDirection,
+	DatabaseTransferFormat,
+} from "@/transfer/types.js";
+import {
 	initTelemetry,
 	shutdownTelemetry,
 	trackActive,
@@ -232,7 +240,7 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 		// ── Process question ───────────────────────────────────────────────────
 		session.questionCount++;
 		console.log();
-		await _handleQuestion(trimmed, session, config);
+		await _handleQuestion(trimmed, session, config, options);
 	}
 
 	rl.close();
@@ -268,14 +276,139 @@ function shouldPromptForSemanticEnrichment(options: ChatOptions): boolean {
 	return options.noConfirm !== true && process.stdin.isTTY === true;
 }
 
+async function resolveTransferIntentForChat(
+	question: string,
+	options: ChatOptions,
+): Promise<{
+	readonly question?: string;
+	readonly packageGroup?: PackageGroup;
+}> {
+	return resolveTransferIntent({
+		question,
+		noConfirm: options.noConfirm === true,
+		isInteractive: process.stdin.isTTY === true,
+		promptForFormat: promptForTransferFormat,
+		promptForImportFilePath,
+		promptForExportFilePath,
+		promptForExportResource,
+	});
+}
+
+async function promptForImportFilePath(): Promise<string | undefined> {
+	const { filePath } = await inquirer.prompt<{ filePath: string }>([
+		{
+			type: "input",
+			name: "filePath",
+			message: "Enter import file path",
+			validate: (value: string) =>
+				value.trim().length > 0 ? true : "Import file path is required.",
+		},
+	]);
+	return filePath.trim();
+}
+
+async function promptForExportFilePath(
+	format: DatabaseTransferFormat,
+): Promise<string | undefined> {
+	const { filePath } = await inquirer.prompt<{ filePath: string }>([
+		{
+			type: "input",
+			name: "filePath",
+			message: "Enter export output file path",
+			default: `qcp-export.${defaultExtensionForFormat(format)}`,
+			validate: (value: string) =>
+				value.trim().length > 0 ? true : "Export output file path is required.",
+		},
+	]);
+	return filePath.trim();
+}
+
+async function promptForExportResource(): Promise<string | undefined> {
+	const { resource } = await inquirer.prompt<{ resource: string }>([
+		{
+			type: "input",
+			name: "resource",
+			message: "Enter table, schema, database, or query to export",
+			validate: (value: string) =>
+				value.trim().length > 0 ? true : "Export resource is required.",
+		},
+	]);
+	return resource.trim();
+}
+
+async function promptForTransferFormat(
+	direction: DatabaseTransferDirection,
+): Promise<ReturnType<typeof supportedTransferFormatChoices>[number] | undefined> {
+	const choices = supportedTransferFormatChoices(direction);
+	const { format } = await inquirer.prompt<{
+		format: ReturnType<typeof supportedTransferFormatChoices>[number];
+	}>([
+		{
+			type: "list",
+			name: "format",
+			message: `Select ${direction} file format`,
+			choices: choices.map((choice) => ({ name: choice, value: choice })),
+		},
+	]);
+	return format;
+}
+
+function defaultExtensionForFormat(format: DatabaseTransferFormat): string {
+	switch (format) {
+		case "csv":
+			return "csv";
+		case "tsv":
+			return "tsv";
+		case "json":
+			return "json";
+		case "jsonl":
+			return "jsonl";
+		case "parquet":
+			return "parquet";
+		case "sqlite":
+			return "db";
+		case "pandas":
+			return "pd";
+		case "postgres-dump":
+			return "sql";
+		default: {
+			const _exhaustive: never = format;
+			return _exhaustive;
+		}
+	}
+}
+
 // ─── Question handler ──────────────────────────────────────────────────────────
 
 async function _handleQuestion(
 	question: string,
 	session: ChatSession,
 	config: ReturnType<typeof loadConfig>,
+	options: ChatOptions,
 ): Promise<void> {
-	const promptViolation = classifyPromptViolation(question);
+	let questionForAgent = question;
+	try {
+		const transferIntent = await resolveTransferIntentForChat(
+			questionForAgent,
+			options,
+		);
+		if (transferIntent.question) {
+			questionForAgent = transferIntent.question;
+		}
+		if (transferIntent.packageGroup) {
+			await ensurePackageGroups({
+				commandName: "qcp chat",
+				groups: [transferIntent.packageGroup],
+				interactive: options.noConfirm !== true,
+			});
+		}
+	} catch (err: unknown) {
+		const msg = err instanceof Error ? err.message : String(err);
+		printError(msg);
+		return;
+	}
+
+	const promptViolation = classifyPromptViolation(questionForAgent);
 	if (promptViolation) {
 		printPromptViolation(promptViolation);
 		trackQueryRejected(`${promptViolation.category}_prompt_violation`);
@@ -284,7 +417,7 @@ async function _handleQuestion(
 
 	const spinner = ora("Thinking...").start();
 	try {
-		const response = await session.supervisor.generateResponse(question);
+		const response = await session.supervisor.generateResponse(questionForAgent);
 		spinner.succeed(response.direct ? "Ready" : "Done");
 		printChatAnswer(response.text);
 

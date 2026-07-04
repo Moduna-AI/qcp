@@ -48,6 +48,18 @@ export const PACKAGE_GROUPS = {
 		description: "Support bundle zip creation",
 		packages: ["archiver"] as const,
 	},
+	"format-parquet": {
+		description: "Parquet database transfer adapter",
+		packages: ["parquetjs-lite"] as const,
+	},
+	"format-sqlite": {
+		description: "SQLite .db database transfer adapter",
+		packages: ["@libsql/client"] as const,
+	},
+	"format-pandas": {
+		description: "Pandas pickle database transfer adapter",
+		packages: ["pyodide"] as const,
+	},
 	telemetry: {
 		description: "Anonymous usage telemetry",
 		packages: ["posthog-node"] as const,

@@ -81,6 +81,8 @@ describe("supabase database agent", () => {
 		expect(Object.keys(tools).sort()).toEqual([
 			"qcp_execute_read_sql",
 			"qcp_explain_read_sql",
+			"qcp_export_database_data",
+			"qcp_import_database_data",
 			"qcp_read_database_context",
 			"qcp_read_supabase_context",
 			"qcp_suggest_query_improvements",

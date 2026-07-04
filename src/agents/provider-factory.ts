@@ -1,10 +1,12 @@
 import type { ToolsInput } from "@mastra/core/agent";
+import type { ActiveDatabaseConnection } from "@/types/index.js";
 import type { AuditContext } from "@/logger/audit.js";
 import {
 	CliSemanticQuestionAdapter,
 	HumanSemanticQuestionService,
 	McpSemanticQuestionAdapter,
 } from "@/semantic/question-service.js";
+import { saveSchemaForConnection, scanSchema } from "@/schema/index.js";
 import { SemanticStore, semanticStoreExists } from "@/semantic/store.js";
 import { createSemanticTools } from "@/semantic/tools.js";
 import type { DatabaseSchema, QcpConfig } from "@/types/index.js";
@@ -50,6 +52,7 @@ export async function createProviderDatabaseAgent(
 			sensitiveTablePatterns: options.config.sensitiveTablePatterns,
 			approvalHandler: options.approvalHandler,
 			auditContext: options.auditContext,
+			refreshSchemaAfterImport: createSchemaRefreshHandler(options),
 		}),
 		...semanticTools,
 		...(options.tools ?? {}),
@@ -167,6 +170,31 @@ async function createProviderSemanticTools(
 		questionService,
 		auditContext: options.auditContext,
 	});
+}
+
+function createSchemaRefreshHandler(
+	options: CreateProviderDatabaseAgentOptions,
+): (() => Promise<void>) | undefined {
+	if (!options.connectionId) return undefined;
+
+	const connection = options.config.databaseConnections.find(
+		(candidate) => candidate.id === options.connectionId,
+	);
+	if (!connection) return undefined;
+
+	const activeConnection: ActiveDatabaseConnection = {
+		id: connection.id,
+		name: connection.name,
+		databaseType: connection.databaseType,
+		databaseUrl: connection.databaseUrl,
+		prismaSchemaPath: connection.prismaSchemaPath,
+		prismaDatasourceName: connection.prismaDatasourceName,
+	};
+
+	return async () => {
+		const refreshed = await scanSchema(activeConnection.databaseUrl);
+		saveSchemaForConnection(activeConnection, refreshed);
+	};
 }
 
 export function isProviderDatabaseAgent(
