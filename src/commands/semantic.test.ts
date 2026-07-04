@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import {
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -99,7 +94,11 @@ function tempHome(): string {
 
 function seedRuntimePackage(home: string, packageName: string): void {
 	const packageStore = join(home, ".qcp", "packages");
-	const packageDir = join(packageStore, "node_modules", ...packageName.split("/"));
+	const packageDir = join(
+		packageStore,
+		"node_modules",
+		...packageName.split("/"),
+	);
 	mkdirSync(
 		join(packageStore, "node_modules", ...packageName.split("/").slice(0, -1)),
 		{

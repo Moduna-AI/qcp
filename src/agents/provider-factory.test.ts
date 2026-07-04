@@ -27,6 +27,7 @@ describe("provider database agent factory", () => {
 			});
 
 			expect(agent.getDatabaseType()).toBe(expectedAgentType);
+			expect(agent.getTools()).toHaveProperty("qcp_suggest_query_improvements");
 		}
 	});
 

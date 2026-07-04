@@ -1,6 +1,6 @@
 {
 	"name": "@moduna/qcp",
-	"version": "0.2.5",
+	"version": "0.2.6",
 	"description": "AI-powered CLI for querying PostgreSQL in natural language",
 	"type": "module",
 	"bin": {

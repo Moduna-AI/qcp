@@ -83,6 +83,7 @@ describe("supabase database agent", () => {
 			"qcp_explain_read_sql",
 			"qcp_read_database_context",
 			"qcp_read_supabase_context",
+			"qcp_suggest_query_improvements",
 			"qcp_validate_sql",
 		]);
 	});

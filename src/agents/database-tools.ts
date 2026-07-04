@@ -14,6 +14,10 @@ import {
 	writeAuditEvent,
 } from "@/logger/audit.js";
 import {
+	type QueryPerformanceAnalysis,
+	QueryPerformanceAnalyzer,
+} from "@/performance/query-performance-analyzer.js";
+import {
 	enforceTenantIsolation,
 	getApprovalReasons,
 	requiresSensitiveApproval,
@@ -84,6 +88,33 @@ const databaseContextSchema = z.object({
 	schemaContext: z.string(),
 	prismaSchemaPath: z.string().optional(),
 	prismaSchema: z.string().optional(),
+});
+
+const queryPlanSummarySchema = z.object({
+	nodeType: z.string(),
+	relationName: z.string().optional(),
+	schemaName: z.string().optional(),
+	estimatedRows: z.number().optional(),
+	totalCost: z.number().optional(),
+	startupCost: z.number().optional(),
+});
+
+const queryPerformanceFindingSchema = z.object({
+	type: z.enum(["missing_index", "select_star", "plan_summary"]),
+	severity: z.enum(["info", "warning", "critical"]),
+	title: z.string(),
+	detail: z.string(),
+	table: z.string().optional(),
+	columns: z.array(z.string()).optional(),
+	suggestionSql: z.string().optional(),
+});
+
+const queryPerformanceAnalysisSchema = z.object({
+	summary: z.string(),
+	plan: queryPlanSummarySchema,
+	findings: z.array(queryPerformanceFindingSchema),
+	suggestedIndexes: z.array(queryPerformanceFindingSchema),
+	warnings: z.array(queryPerformanceFindingSchema),
 });
 
 export interface CreateDatabaseToolsOptions {
@@ -282,6 +313,71 @@ export function createDatabaseTools(
 					context,
 				),
 		}),
+		qcp_suggest_query_improvements: createTool({
+			id: "qcp_suggest_query_improvements",
+			description:
+				"Analyze a read-only PostgreSQL query plan and schema metadata to suggest advisory performance improvements such as missing indexes and SELECT * warnings. Suggested DDL is never executed.",
+			strict: true,
+			inputSchema: z.object({
+				sql: z.string().min(1),
+			}),
+			requestContextSchema: options.enforceTenantIsolation
+				? securityRequestContextSchema
+				: undefined,
+			outputSchema: z.discriminatedUnion("ok", [
+				z.object({
+					ok: z.literal(true),
+					safety: safetyReportSchema,
+					isolation: tenantIsolationReportSchema.optional(),
+					plan: z.string(),
+					estimatedRows: z.number(),
+					approvalReasons: z.array(approvalReasonSchema),
+					analysis: queryPerformanceAnalysisSchema,
+				}),
+				z.object({
+					ok: z.literal(false),
+					safety: safetyReportSchema,
+					isolation: tenantIsolationReportSchema.optional(),
+					error: z.string(),
+					approvalReasons: z.array(approvalReasonSchema),
+				}),
+			]),
+			requireApproval: async ({ sql }, context) =>
+				shouldRequireDatabaseToolApproval({
+					sql,
+					databaseUrl: options.databaseUrl,
+					schema: options.schema,
+					sensitiveTablePatterns,
+					explainExecutor,
+					enforceTenantIsolation: options.enforceTenantIsolation ?? false,
+					requestContext: context?.requestContext,
+				}),
+			toModelOutput: sanitizedToolModelOutput,
+			transform: secureToolTransform(),
+			mcp: {
+				annotations: {
+					title: "Suggest Query Improvements",
+					readOnlyHint: true,
+					destructiveHint: false,
+					idempotentHint: true,
+					openWorldHint: false,
+				},
+			},
+			execute: async ({ sql }, context) =>
+				executeSecureQueryImprovementAnalysis(
+					{
+						databaseUrl: options.databaseUrl,
+						schema: options.schema,
+						explainExecutor,
+						sensitiveTablePatterns,
+						enforceTenantIsolation: options.enforceTenantIsolation ?? false,
+						approvalHandler: options.approvalHandler,
+						auditContext: options.auditContext,
+					},
+					sql,
+					context,
+				),
+		}),
 	};
 }
 
@@ -305,6 +401,8 @@ export interface SecureExplainOptions {
 	readonly auditContext?: AuditContext;
 }
 
+export interface SecureQueryImprovementOptions extends SecureExplainOptions {}
+
 export type SecureReadOutput =
 	| {
 			readonly ok: true;
@@ -323,6 +421,18 @@ export type SecureExplainOutput =
 			readonly plan: string;
 			readonly estimatedRows: number;
 			readonly approvalReasons: ReturnType<typeof getApprovalReasons>;
+	  }
+	| SecureQueryError;
+
+export type SecureQueryImprovementOutput =
+	| {
+			readonly ok: true;
+			readonly safety: ReturnType<typeof validateSql>;
+			readonly isolation?: ReturnType<typeof enforceTenantIsolation>;
+			readonly plan: string;
+			readonly estimatedRows: number;
+			readonly approvalReasons: ReturnType<typeof getApprovalReasons>;
+			readonly analysis: QueryPerformanceAnalysis;
 	  }
 	| SecureQueryError;
 
@@ -516,6 +626,162 @@ export async function executeSecureExplainQuery(
 			plan: sanitizeSensitiveData(explain.plan),
 			estimatedRows: explain.estimatedRows,
 			approvalReasons,
+		};
+	} catch (err: unknown) {
+		await auditDatabaseAccess({
+			context: options.auditContext,
+			action: "EXPLAIN",
+			outcome: "failure",
+			sql: base.processedSql,
+			safety: base.safety,
+			isolation: base.isolation,
+			approvalReasons: base.approvalReasons,
+			error: sanitizeDatabaseError(err),
+		});
+		return {
+			ok: false,
+			safety: base.safety,
+			isolation: base.isolation,
+			error: sanitizeDatabaseError(err),
+			approvalReasons: base.approvalReasons,
+		};
+	}
+}
+
+export async function executeSecureQueryImprovementAnalysis(
+	options: SecureQueryImprovementOptions,
+	sql: string,
+	context?: unknown,
+): Promise<SecureQueryImprovementOutput> {
+	const base = prepareSecureQuery(
+		sql,
+		options.schema,
+		options.sensitiveTablePatterns ?? [],
+		options.enforceTenantIsolation ?? false,
+		context,
+	);
+	if (!base.ok) {
+		await auditDatabaseAccess({
+			context: options.auditContext,
+			action: "QUERY_REJECTED",
+			outcome: "rejected",
+			sql,
+			safety: base.safety,
+			isolation: base.isolation,
+			approvalReasons: base.approvalReasons,
+			error: base.error,
+		});
+		return base;
+	}
+
+	const sensitiveApproved = await confirmApprovalIfNeeded({
+		reasons: base.approvalReasons,
+		sql: base.processedSql,
+		approvalHandler: options.approvalHandler,
+		auditContext: options.auditContext,
+		action: "EXPLAIN",
+		safety: base.safety,
+		isolation: base.isolation,
+	});
+	if (!sensitiveApproved) {
+		await auditDatabaseAccess({
+			context: options.auditContext,
+			action: "APPROVAL_DENIED",
+			outcome: "cancelled",
+			sql: base.processedSql,
+			safety: base.safety,
+			isolation: base.isolation,
+			approvalReasons: base.approvalReasons,
+			error: "Query requires approval before performance analysis.",
+		});
+		return {
+			ok: false,
+			safety: base.safety,
+			isolation: base.isolation,
+			error: "Query requires approval before performance analysis.",
+			approvalReasons: base.approvalReasons,
+		};
+	}
+
+	const explainExecutor = options.explainExecutor ?? explainQuery;
+	try {
+		const explain = await explainExecutor(
+			options.databaseUrl,
+			base.processedSql,
+		);
+		const approvalReasons = getApprovalReasons(
+			base.processedSql,
+			base.safety,
+			[...(options.sensitiveTablePatterns ?? [])],
+			explain.estimatedRows,
+		);
+		const newApprovalReasons = approvalReasons.filter(
+			(reason) =>
+				!base.approvalReasons.some(
+					(baseReason) =>
+						baseReason.type === reason.type &&
+						baseReason.detail === reason.detail,
+				),
+		);
+		const costApproved = await confirmApprovalIfNeeded({
+			reasons: newApprovalReasons,
+			sql: base.processedSql,
+			approvalHandler: options.approvalHandler,
+			auditContext: options.auditContext,
+			action: "EXPLAIN",
+			safety: base.safety,
+			isolation: base.isolation,
+		});
+		if (!costApproved) {
+			await auditDatabaseAccess({
+				context: options.auditContext,
+				action: "APPROVAL_DENIED",
+				outcome: "cancelled",
+				sql: base.processedSql,
+				safety: base.safety,
+				isolation: base.isolation,
+				approvalReasons,
+				error: "Query requires approval before performance analysis.",
+			});
+			return {
+				ok: false,
+				safety: base.safety,
+				isolation: base.isolation,
+				error: "Query requires approval before performance analysis.",
+				approvalReasons,
+			};
+		}
+
+		const analysis = new QueryPerformanceAnalyzer(options.schema).analyze(
+			base.processedSql,
+			explain.plan,
+		);
+
+		await auditDatabaseAccess({
+			context: options.auditContext,
+			action: "EXPLAIN",
+			outcome: "success",
+			sql: base.processedSql,
+			safety: base.safety,
+			isolation: base.isolation,
+			approvalReasons,
+			estimatedRows: explain.estimatedRows,
+			metadata: {
+				analysis: {
+					findingCount: analysis.findings.length,
+					suggestedIndexCount: analysis.suggestedIndexes.length,
+					warningCount: analysis.warnings.length,
+				},
+			},
+		});
+		return {
+			ok: true,
+			safety: base.safety,
+			isolation: base.isolation,
+			plan: sanitizeSensitiveData(explain.plan),
+			estimatedRows: explain.estimatedRows,
+			approvalReasons,
+			analysis: sanitizeSensitiveData(analysis),
 		};
 	} catch (err: unknown) {
 		await auditDatabaseAccess({

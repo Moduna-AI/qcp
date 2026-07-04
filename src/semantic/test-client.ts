@@ -73,7 +73,10 @@ class InMemorySemanticSqlClient implements SemanticSqlClient {
 		const args = typeof statement === "string" ? [] : (statement.args ?? []);
 		const normalized = normalizeSql(sql);
 
-		if (normalized.startsWith("create ") || normalized.startsWith("create index")) {
+		if (
+			normalized.startsWith("create ") ||
+			normalized.startsWith("create index")
+		) {
 			return { rows: [] };
 		}
 
@@ -116,7 +119,9 @@ class InMemorySemanticSqlClient implements SemanticSqlClient {
 			const versions = this.annotations
 				.filter((row) => row.object_id === objectId)
 				.map((row) => row.version);
-			return { rows: [{ version: versions.length > 0 ? Math.max(...versions) : null }] };
+			return {
+				rows: [{ version: versions.length > 0 ? Math.max(...versions) : null }],
+			};
 		}
 		if (normalized.startsWith("insert into semantic_annotations")) {
 			this.annotations.push({
@@ -162,7 +167,9 @@ class InMemorySemanticSqlClient implements SemanticSqlClient {
 			this.upsertRelationship(args);
 			return { rows: [] };
 		}
-		if (normalized.startsWith("select * from semantic_relationships where id = ?")) {
+		if (
+			normalized.startsWith("select * from semantic_relationships where id = ?")
+		) {
 			const row = this.relationships.get(asString(args[0]));
 			return { rows: row ? [row] : [] };
 		}
@@ -234,15 +241,12 @@ class InMemorySemanticSqlClient implements SemanticSqlClient {
 				: null;
 		return [...this.objects.values()]
 			.filter((row) => row.connection_id === connectionId)
-			.filter((row) => !normalizedSql.includes("active = 1") || row.active === 1)
+			.filter(
+				(row) => !normalizedSql.includes("active = 1") || row.active === 1,
+			)
 			.filter((row) => objectType === null || row.object_type === objectType)
 			.sort((a, b) =>
-				[
-					a.schema_name,
-					a.table_name,
-					a.column_name ?? "",
-					a.object_type,
-				]
+				[a.schema_name, a.table_name, a.column_name ?? "", a.object_type]
 					.join(".")
 					.localeCompare(
 						[
@@ -255,7 +259,9 @@ class InMemorySemanticSqlClient implements SemanticSqlClient {
 			);
 	}
 
-	private listLatestAnnotationRows(connectionId: string): SemanticAnnotationRow[] {
+	private listLatestAnnotationRows(
+		connectionId: string,
+	): SemanticAnnotationRow[] {
 		const objectIds = new Set(
 			[...this.objects.values()]
 				.filter((row) => row.connection_id === connectionId)
@@ -269,8 +275,8 @@ class InMemorySemanticSqlClient implements SemanticSqlClient {
 				latest.set(row.object_id, row);
 			}
 		}
-		return [...latest.values()].sort((a, b) =>
-			a.object_id.localeCompare(b.object_id) || b.version - a.version,
+		return [...latest.values()].sort(
+			(a, b) => a.object_id.localeCompare(b.object_id) || b.version - a.version,
 		);
 	}
 
