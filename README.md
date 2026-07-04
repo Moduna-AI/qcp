@@ -144,6 +144,31 @@ qcp chat
 | `qcp explain "<question>"` | Generate SQL without executing it |
 | `qcp doctor` | Run system diagnostics |
 
+### SDK Usage
+
+qcp also ships an ESM SDK for embedding the assistant in another Node.js or Bun project:
+
+```ts
+import { createQcpClient } from "@moduna/qcp";
+
+const qcp = createQcpClient();
+const answer = await qcp.ask("What tables do you know?");
+
+console.log(answer.text);
+```
+
+The SDK uses the same local qcp config, active connection, cached schema, runtime package store, and read-only guardrails as the CLI. Importing `@moduna/qcp` has no CLI side effects. Runtime package installation is explicit; pass `installMissingPackages: true` or call `installQcpSdkRuntimePackages()` when an embedding app wants qcp to install missing provider/runtime packages.
+
+Curated subpath exports are available for lower-level integrations:
+
+```ts
+import type { DatabaseSchema } from "@moduna/qcp/types";
+import { validateSql } from "@moduna/qcp/safety";
+import { scanSchema } from "@moduna/qcp/schema";
+import { executeQuery } from "@moduna/qcp/db";
+import { listPackageGroupStatuses } from "@moduna/qcp/runtime";
+```
+
 ### Model Management
 
 ```bash
@@ -421,6 +446,8 @@ bun run lint
 
 ```
 src/
+  index.ts      SDK entry point
+  sdk.ts        High-level importable SDK client
   cli/          CLI entry point (Commander.js)
   commands/     One file per command
   config/       Config read/write + paths
@@ -432,6 +459,7 @@ src/
   telemetry/    PostHog (privacy-safe)
   logger/       Winston file logger
   output/       Terminal formatting (chalk, cli-table3)
+  runtime.ts    Runtime package helpers exported for SDK users
   types/        TypeScript interfaces
 tests/
   safety.test.ts    SQL safety validation tests

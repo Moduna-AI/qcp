@@ -1,13 +1,42 @@
 {
 	"name": "@moduna/qcp",
-	"version": "0.2.6",
+	"version": "0.2.7",
 	"description": "AI-powered CLI for querying PostgreSQL in natural language",
 	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./types": {
+			"types": "./dist/types/index.d.ts",
+			"import": "./dist/types/index.js"
+		},
+		"./safety": {
+			"types": "./dist/safety/index.d.ts",
+			"import": "./dist/safety/index.js"
+		},
+		"./schema": {
+			"types": "./dist/schema/index.d.ts",
+			"import": "./dist/schema/index.js"
+		},
+		"./db": {
+			"types": "./dist/db/index.d.ts",
+			"import": "./dist/db/index.js"
+		},
+		"./runtime": {
+			"types": "./dist/runtime.d.ts",
+			"import": "./dist/runtime.js"
+		},
+		"./package.json": "./package.json"
+	},
 	"bin": {
 		"qcp": "dist/qcp.js"
 	},
 	"files": [
-		"dist/qcp.js",
+		"dist",
 		"README.md",
 		"LICENSE"
 	],
@@ -16,7 +45,10 @@
 	},
 	"scripts": {
 		"dev": "bun run src/cli/index.ts",
-		"build": "bun build ./src/cli/index.ts --target=node --outfile=dist/qcp.js",
+		"build": "bun run build:cli && bun run build:sdk && bun run build:types",
+		"build:cli": "bun build ./src/cli/index.ts --target=node --outfile=dist/qcp.js",
+		"build:sdk": "bun build ./src/index.ts ./src/types/index.ts ./src/safety/index.ts ./src/schema/index.ts ./src/db/index.ts ./src/runtime.ts --target=node --format=esm --splitting --outdir=dist",
+		"build:types": "bunx tsc -p tsconfig.build.json",
 		"build:bun": "bun build ./src/cli/index.ts --target=bun --outfile=dist/qcp-bun.js",
 		"build:binary": "bun build ./src/cli/index.ts --compile --outfile=dist/qcp",
 		"build:binary:macos-arm64": "bun build ./src/cli/index.ts --compile --target=bun-macos-arm64 --outfile=dist/qcp-macos-arm64",

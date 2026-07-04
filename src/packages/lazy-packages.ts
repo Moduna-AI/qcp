@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import { QCP_PACKAGES_DIR } from "@/config/index.js";
-import type { ProviderName } from "@/types/index.js";
+import { QCP_PACKAGES_DIR } from "../config/index.js";
+import type { ProviderName } from "../types/index.js";
 
 const runtimeRequire = createRequire(import.meta.url);
 
@@ -47,6 +47,18 @@ export const PACKAGE_GROUPS = {
 	"doctor-bundle": {
 		description: "Support bundle zip creation",
 		packages: ["archiver"] as const,
+	},
+	"format-parquet": {
+		description: "Parquet database transfer adapter",
+		packages: ["parquetjs-lite"] as const,
+	},
+	"format-sqlite": {
+		description: "SQLite .db database transfer adapter",
+		packages: ["@libsql/client"] as const,
+	},
+	"format-pandas": {
+		description: "Pandas pickle database transfer adapter",
+		packages: ["pyodide"] as const,
 	},
 	telemetry: {
 		description: "Anonymous usage telemetry",

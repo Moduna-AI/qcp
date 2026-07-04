@@ -1,6 +1,6 @@
 import inquirer from "inquirer";
 import ora from "ora";
-import type { ProviderName } from "@/types/index.js";
+import type { ProviderName } from "../types/index.js";
 import {
 	formatInstallCommand,
 	getPackageGroupStatus,
