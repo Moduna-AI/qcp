@@ -1,11 +1,11 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { ensureConfigDir, LOCAL_SCHEMA_PATH } from "@/config/index.js";
+import { ensureConfigDir, LOCAL_SCHEMA_PATH } from "../config/index.js";
 import type {
 	ActiveDatabaseConnection,
 	DatabaseSchema,
 	SchemaCatalog,
 	SchemaCatalogEntry,
-} from "@/types/index.js";
+} from "../types/index.js";
 
 export interface SchemaCatalogStoreOptions {
 	readonly catalogPath: string;

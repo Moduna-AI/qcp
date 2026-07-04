@@ -2,8 +2,8 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import { QCP_PACKAGES_DIR } from "@/config/index.js";
-import type { ProviderName } from "@/types/index.js";
+import { QCP_PACKAGES_DIR } from "../config/index.js";
+import type { ProviderName } from "../types/index.js";
 
 const runtimeRequire = createRequire(import.meta.url);
 

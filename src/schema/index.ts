@@ -6,7 +6,7 @@ import {
 	LOCAL_SCHEMA_CATALOG_PATH,
 	LOCAL_SCHEMA_PATH,
 	loadConfig,
-} from "@/config/index.js";
+} from "../config/index.js";
 import type {
 	ActiveDatabaseConnection,
 	DatabaseSchema,
@@ -15,7 +15,7 @@ import type {
 	SchemaForeignKey,
 	SchemaIndex,
 	SchemaTable,
-} from "@/types/index.js";
+} from "../types/index.js";
 import { SchemaCatalogStore } from "./catalog-store.js";
 
 // ─── Schema scanning ──────────────────────────────────────────────────────────

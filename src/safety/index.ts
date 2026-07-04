@@ -29,7 +29,7 @@ import type {
 	SchemaTable,
 	SecurityRequestContext,
 	TenantIsolationReport,
-} from "@/types/index.js";
+} from "../types/index.js";
 
 // ─── Statement allowlist ──────────────────────────────────────────────────────
 
