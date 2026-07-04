@@ -33,6 +33,13 @@ import type {
 	SecureQueryError,
 	SecurityRequestContext,
 } from "@/types/index.js";
+import { DatabaseTransferService } from "@/transfer/database-transfer-service.js";
+import type {
+	DatabaseTransferFormat,
+	TransferExportRequest,
+	TransferImportRequest,
+	TransferResult,
+} from "@/transfer/types.js";
 
 export type DatabaseQueryExecutor = (
 	databaseUrl: string,
@@ -117,6 +124,37 @@ const queryPerformanceAnalysisSchema = z.object({
 	warnings: z.array(queryPerformanceFindingSchema),
 });
 
+const transferFormatSchema = z.enum([
+	"csv",
+	"tsv",
+	"json",
+	"jsonl",
+	"parquet",
+	"sqlite",
+	"pandas",
+	"postgres-dump",
+]);
+
+const transferResultSchema = z.discriminatedUnion("ok", [
+	z.object({
+		ok: z.literal(true),
+		direction: z.enum(["import", "export"]),
+		format: transferFormatSchema,
+		filePath: z.string(),
+		rowCount: z.number(),
+		tableName: z.string().optional(),
+		fields: z.array(z.string()).optional(),
+		schemaRefreshed: z.boolean().optional(),
+	}),
+	z.object({
+		ok: z.literal(false),
+		direction: z.enum(["import", "export"]),
+		format: transferFormatSchema.optional(),
+		filePath: z.string().optional(),
+		error: z.string(),
+	}),
+]);
+
 export interface CreateDatabaseToolsOptions {
 	readonly databaseUrl: string;
 	readonly schema: DatabaseSchema;
@@ -127,6 +165,8 @@ export interface CreateDatabaseToolsOptions {
 	readonly prismaSchemaPath?: string;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
 	readonly auditContext?: AuditContext;
+	readonly transferService?: DatabaseTransferService;
+	readonly refreshSchemaAfterImport?: () => Promise<void>;
 }
 
 export function createDatabaseTools(
@@ -135,6 +175,34 @@ export function createDatabaseTools(
 	const queryExecutor = options.queryExecutor ?? executeQuery;
 	const explainExecutor = options.explainExecutor ?? explainQuery;
 	const sensitiveTablePatterns = [...(options.sensitiveTablePatterns ?? [])];
+	const transferService =
+		options.transferService ??
+		new DatabaseTransferService({
+			databaseUrl: options.databaseUrl,
+			schema: options.schema,
+			refreshSchema: options.refreshSchemaAfterImport,
+			queryExecutor: async (sql) => {
+				const output = await executeSecureReadQuery(
+					{
+						databaseUrl: options.databaseUrl,
+						schema: options.schema,
+						queryExecutor,
+						sensitiveTablePatterns,
+						approvalHandler: options.approvalHandler,
+						auditContext: options.auditContext,
+					},
+					sql,
+				);
+				if (!output.ok) {
+					return {
+						ok: false,
+						direction: "export",
+						error: output.error,
+					} satisfies TransferResult;
+				}
+				return output.result;
+			},
+		});
 
 	return {
 		qcp_read_database_context: createTool({
@@ -377,6 +445,90 @@ export function createDatabaseTools(
 					sql,
 					context,
 				),
+		}),
+		qcp_export_database_data: createTool({
+			id: "qcp_export_database_data",
+			description:
+				"Export selected database table data or a validated read-only SQL query result to a local file. Use this when the user asks to export, download, save, or dump data.",
+			strict: true,
+			inputSchema: z
+				.object({
+					filePath: z.string().min(1),
+					format: transferFormatSchema.optional(),
+					sql: z.string().min(1).optional(),
+					table: z
+						.object({
+							schema: z.string().min(1).optional(),
+							table: z.string().min(1),
+						})
+						.optional(),
+				})
+				.refine((value) => Boolean(value.sql ?? value.table), {
+					message: "Export requires either sql or table.",
+				}),
+			outputSchema: transferResultSchema,
+			toModelOutput: sanitizedToolModelOutput,
+			transform: secureToolTransform(),
+			mcp: {
+				annotations: {
+					title: "Export Database Data",
+					readOnlyHint: true,
+					destructiveHint: false,
+					idempotentHint: false,
+					openWorldHint: false,
+				},
+			},
+			execute: async (input) =>
+				transferService.exportData(input as TransferExportRequest),
+		}),
+		qcp_import_database_data: createTool({
+			id: "qcp_import_database_data",
+			description:
+				"Import local data into the active database by creating a new table only. Never append to, replace, truncate, or modify an existing table.",
+			strict: true,
+			inputSchema: z.object({
+				filePath: z.string().min(1),
+				format: transferFormatSchema.optional(),
+				tableName: z.string().min(1).optional(),
+				schemaName: z.string().min(1).optional(),
+			}),
+			outputSchema: transferResultSchema,
+			requireApproval: async () => true,
+			toModelOutput: sanitizedToolModelOutput,
+			transform: secureToolTransform(),
+			mcp: {
+				annotations: {
+					title: "Import Database Data",
+					readOnlyHint: false,
+					destructiveHint: false,
+					idempotentHint: false,
+					openWorldHint: false,
+				},
+			},
+			execute: async (input) => {
+				const request = input as TransferImportRequest;
+				const approved = await confirmTransferApproval({
+					approvalHandler: options.approvalHandler,
+					reasons: [
+						{
+							type: "large_scan",
+							detail:
+								"Import creates a new table in the active database and requires approval.",
+						},
+					],
+					operation: `IMPORT ${request.filePath} INTO ${request.schemaName ?? "public"}.${request.tableName ?? "(filename-derived table)"}`,
+				});
+				if (!approved) {
+					return {
+						ok: false,
+						direction: "import",
+						format: request.format,
+						filePath: request.filePath,
+						error: "Import requires approval before creating a table.",
+					} satisfies TransferResult;
+				}
+				return transferService.importData(request);
+			},
 		}),
 	};
 }
@@ -982,6 +1134,15 @@ async function confirmApprovalIfNeeded(
 	});
 
 	return approved;
+}
+
+async function confirmTransferApproval(options: {
+	readonly approvalHandler?: DatabaseToolApprovalHandler;
+	readonly reasons: readonly ApprovalReason[];
+	readonly operation: string;
+}): Promise<boolean> {
+	if (!options.approvalHandler) return false;
+	return options.approvalHandler([...options.reasons], options.operation);
 }
 
 interface AuditDatabaseAccessOptions {

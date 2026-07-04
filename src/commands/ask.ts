@@ -30,6 +30,14 @@ import { classifyPromptViolation } from "@/safety/index.js";
 import { loadSchemaForConnection, schemaToContext } from "@/schema/index.js";
 import { semanticStoreExists } from "@/semantic/store.js";
 import {
+	resolveTransferIntent,
+	supportedTransferFormatChoices,
+} from "@/transfer/intent.js";
+import type {
+	DatabaseTransferDirection,
+	DatabaseTransferFormat,
+} from "@/transfer/types.js";
+import {
 	initTelemetry,
 	shutdownTelemetry,
 	trackActive,
@@ -68,6 +76,8 @@ export async function askCommand(
 		process.exit(1);
 	}
 	const activeConfig = withActiveDatabaseConnection(config, connection);
+	let questionForAgent = question;
+	let transferPackageGroup: PackageGroup | undefined;
 
 	// ── Load schema once ──────────────────────────────────────────────────────────
 	const schemaSpinner = ora("Loading schema...").start();
@@ -92,10 +102,19 @@ export async function askCommand(
 	// ── Create supervisor agent ───────────────────────────────────────────────────
 	let supervisor: QcpSupervisorAgent;
 	try {
+		const transferIntent = await resolveTransferIntentForAsk(
+			questionForAgent,
+			options,
+		);
+		if (transferIntent.question) {
+			questionForAgent = transferIntent.question;
+		}
+		transferPackageGroup = transferIntent.packageGroup;
 		const packageAudit = auditAskRuntimePackages(
 			activeConfig,
 			undefined,
 			semanticStoreExists(),
+			transferPackageGroup,
 		);
 		if (packageAudit.missingGroups.length > 0) {
 			await ensurePackageGroups({
@@ -133,9 +152,9 @@ export async function askCommand(
 		process.exit(1);
 	}
 
-	printQuestion(question);
+	printQuestion(questionForAgent);
 
-	const promptViolation = classifyPromptViolation(question);
+	const promptViolation = classifyPromptViolation(questionForAgent);
 	if (promptViolation) {
 		printPromptViolation(promptViolation);
 		trackQueryRejected(`${promptViolation.category}_prompt_violation`);
@@ -146,7 +165,7 @@ export async function askCommand(
 	// ── Ask supervisor ────────────────────────────────────────────────────────────
 	const responseSpinner = ora("Thinking...").start();
 	try {
-		const response = await supervisor.generateResponse(question);
+		const response = await supervisor.generateResponse(questionForAgent);
 		responseSpinner.succeed(response.direct ? "Ready" : "Done");
 		printSummary(response.text);
 
@@ -191,6 +210,7 @@ export async function askCommand(
 function getAskRuntimePackageGroups(
 	config: ReturnType<typeof loadConfig>,
 	semanticEnabled = false,
+	transferPackageGroup?: PackageGroup,
 ): PackageGroup[] {
 	const groups: PackageGroup[] = [
 		"agent",
@@ -199,6 +219,7 @@ function getAskRuntimePackageGroups(
 	if (config.databaseType === "prisma-postgres") groups.push("prisma");
 	if (config.databaseType === "neon") groups.push("neon");
 	if (semanticEnabled) groups.push("semantic");
+	if (transferPackageGroup) groups.push(transferPackageGroup);
 	return groups;
 }
 
@@ -206,11 +227,114 @@ export function auditAskRuntimePackages(
 	config: ReturnType<typeof loadConfig>,
 	targetDir?: string,
 	semanticEnabled = false,
+	transferPackageGroup?: PackageGroup,
 ): PackageGroupsAudit {
 	return auditPackageGroups(
-		getAskRuntimePackageGroups(config, semanticEnabled),
+		getAskRuntimePackageGroups(config, semanticEnabled, transferPackageGroup),
 		targetDir,
 	);
+}
+
+async function resolveTransferIntentForAsk(
+	question: string,
+	options: AskOptions,
+): Promise<{
+	readonly question?: string;
+	readonly packageGroup?: PackageGroup;
+}> {
+	return resolveTransferIntent({
+		question,
+		noConfirm: options.noConfirm === true,
+		isInteractive: process.stdin.isTTY === true,
+		promptForFormat: promptForTransferFormat,
+		promptForImportFilePath,
+		promptForExportFilePath,
+		promptForExportResource,
+	});
+}
+
+async function promptForImportFilePath(): Promise<string | undefined> {
+	const { filePath } = await inquirer.prompt<{ filePath: string }>([
+		{
+			type: "input",
+			name: "filePath",
+			message: "Enter import file path",
+			validate: (value: string) =>
+				value.trim().length > 0 ? true : "Import file path is required.",
+		},
+	]);
+	return filePath.trim();
+}
+
+async function promptForExportFilePath(
+	format: DatabaseTransferFormat,
+): Promise<string | undefined> {
+	const { filePath } = await inquirer.prompt<{ filePath: string }>([
+		{
+			type: "input",
+			name: "filePath",
+			message: "Enter export output file path",
+			default: `qcp-export.${defaultExtensionForFormat(format)}`,
+			validate: (value: string) =>
+				value.trim().length > 0 ? true : "Export output file path is required.",
+		},
+	]);
+	return filePath.trim();
+}
+
+async function promptForExportResource(): Promise<string | undefined> {
+	const { resource } = await inquirer.prompt<{ resource: string }>([
+		{
+			type: "input",
+			name: "resource",
+			message: "Enter table, schema, database, or query to export",
+			validate: (value: string) =>
+				value.trim().length > 0 ? true : "Export resource is required.",
+		},
+	]);
+	return resource.trim();
+}
+
+async function promptForTransferFormat(
+	direction: DatabaseTransferDirection,
+): Promise<ReturnType<typeof supportedTransferFormatChoices>[number] | undefined> {
+	const choices = supportedTransferFormatChoices(direction);
+	const { format } = await inquirer.prompt<{
+		format: ReturnType<typeof supportedTransferFormatChoices>[number];
+	}>([
+		{
+			type: "list",
+			name: "format",
+			message: `Select ${direction} file format`,
+			choices: choices.map((choice) => ({ name: choice, value: choice })),
+		},
+	]);
+	return format;
+}
+
+function defaultExtensionForFormat(format: DatabaseTransferFormat): string {
+	switch (format) {
+		case "csv":
+			return "csv";
+		case "tsv":
+			return "tsv";
+		case "json":
+			return "json";
+		case "jsonl":
+			return "jsonl";
+		case "parquet":
+			return "parquet";
+		case "sqlite":
+			return "db";
+		case "pandas":
+			return "pd";
+		case "postgres-dump":
+			return "sql";
+		default: {
+			const _exhaustive: never = format;
+			return _exhaustive;
+		}
+	}
 }
 
 function shouldPromptForSemanticEnrichment(options: AskOptions): boolean {

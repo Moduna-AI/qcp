@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ToolsInput } from "@mastra/core/agent";
 import type { ToolAction } from "@mastra/core/tools";
 import type { AuditRecord } from "@/logger/audit.js";
+import { DatabaseTransferService } from "@/transfer/database-transfer-service.js";
 import type { DatabaseSchema, QueryResult } from "@/types/index.js";
 import { createDatabaseTools } from "./database-tools.js";
 
@@ -257,6 +258,100 @@ describe("shared database agent tools", () => {
 		expect(output.ok).toBe(true);
 		expect(output.plan).not.toContain("ada@example.com");
 		expect(output.plan).toContain("[REDACTED_EMAIL]");
+	});
+
+	test("exports database data through the shared Mastra tool", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "qcp-transfer-tool-"));
+		const tools = createDatabaseTools({
+			databaseUrl: "postgres://example",
+			schema,
+			transferService: new DatabaseTransferService({
+				databaseUrl: "postgres://example",
+				schema,
+				cwd: dir,
+				queryExecutor: async () => ({
+					rows: [{ id: 1, name: "Ada" }],
+					rowCount: 1,
+					fields: ["id", "name"],
+					executionTimeMs: 1,
+				}),
+			}),
+		});
+
+		const result = await executeTool(tools, "qcp_export_database_data", {
+			filePath: "projects.json",
+			table: { table: "projects" },
+		});
+		const output = result as { ok: boolean; rowCount?: number; filePath?: string };
+
+		expect(output.ok).toBe(true);
+		expect(output.rowCount).toBe(1);
+		expect(output.filePath).toBe(join(dir, "projects.json"));
+		expect(readFileSync(join(dir, "projects.json"), "utf-8")).toContain("Ada");
+	});
+
+	test("requires approval before import creates a table", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "qcp-transfer-tool-"));
+		writeFileSync(join(dir, "projects.csv"), "id,name\n1,Ada\n");
+		let imported = false;
+		const tools = createDatabaseTools({
+			databaseUrl: "postgres://example",
+			schema,
+			transferService: new DatabaseTransferService({
+				databaseUrl: "postgres://example",
+				schema,
+				cwd: dir,
+				tableExists: async () => false,
+				importExecutor: async () => {
+					imported = true;
+					return { rowCount: 1 };
+				},
+			}),
+		});
+
+		const result = await executeTool(tools, "qcp_import_database_data", {
+			filePath: "projects.csv",
+		});
+		const output = result as { ok: boolean; error?: string };
+
+		expect(output.ok).toBe(false);
+		expect(output.error).toMatch(/approval/i);
+		expect(imported).toBe(false);
+	});
+
+	test("imports database data when approval is granted", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "qcp-transfer-tool-"));
+		writeFileSync(join(dir, "customers.json"), '[{"id":1,"name":"Ada"}]\n');
+		let approvedOperation = "";
+		let importedRows = 0;
+		const tools = createDatabaseTools({
+			databaseUrl: "postgres://example",
+			schema,
+			approvalHandler: async (_reasons, operation) => {
+				approvedOperation = operation;
+				return true;
+			},
+			transferService: new DatabaseTransferService({
+				databaseUrl: "postgres://example",
+				schema,
+				cwd: dir,
+				tableExists: async () => false,
+				importExecutor: async (input) => {
+					importedRows = input.rows.length;
+					return { rowCount: input.rows.length };
+				},
+			}),
+		});
+
+		const result = await executeTool(tools, "qcp_import_database_data", {
+			filePath: "customers.json",
+		});
+		const output = result as { ok: boolean; rowCount?: number };
+
+		expect(output.ok).toBe(true);
+		expect(output.rowCount).toBe(1);
+		expect(importedRows).toBe(1);
+		expect(approvedOperation).toContain("IMPORT customers.json");
 	});
 });
 
