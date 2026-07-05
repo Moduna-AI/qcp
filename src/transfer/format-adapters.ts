@@ -4,8 +4,8 @@ import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
 	importPackageFromStore,
-	requirePackageGroup,
 	type PackageGroup,
+	requirePackageGroup,
 } from "@/packages/lazy-packages.js";
 import type {
 	DatabaseTransferDirection,
@@ -93,7 +93,9 @@ const ADAPTERS: readonly TransferFormatAdapter[] = [
 ];
 
 interface ParquetSchemaConstructor {
-	new (schema: Record<string, { readonly type: "UTF8"; readonly optional: true }>): unknown;
+	new (
+		schema: Record<string, { readonly type: "UTF8"; readonly optional: true }>,
+	): unknown;
 }
 
 interface ParquetWriterLike {
@@ -136,10 +138,7 @@ interface LibsqlModule {
 }
 
 interface PyodideFilesystem {
-	readFile(
-		path: string,
-		options: { readonly encoding: "binary" },
-	): Uint8Array;
+	readFile(path: string, options: { readonly encoding: "binary" }): Uint8Array;
 }
 
 interface PyodideRuntime {
@@ -244,7 +243,9 @@ function writeDelimitedRows(
 	ensureParentDir(filePath);
 	const columns = collectColumns(rows);
 	const lines = [
-		columns.map((column) => encodeDelimitedValue(column, delimiter)).join(delimiter),
+		columns
+			.map((column) => encodeDelimitedValue(column, delimiter))
+			.join(delimiter),
 		...rows.map((row) =>
 			columns
 				.map((column) => encodeDelimitedValue(row[column], delimiter))
@@ -304,7 +305,7 @@ function writeJsonlRows(
 	ensureParentDir(filePath);
 	writeFileSync(
 		filePath,
-		rows.map((row) => JSON.stringify(row)).join("\n") + "\n",
+		`${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
 		"utf-8",
 	);
 }
@@ -430,7 +431,10 @@ async function writePandasPickleRows(
 			`df.to_pickle(${JSON.stringify(virtualPath)})`,
 		].join("\n"),
 	);
-	writeFileSync(filePath, pyodide.FS.readFile(virtualPath, { encoding: "binary" }));
+	writeFileSync(
+		filePath,
+		pyodide.FS.readFile(virtualPath, { encoding: "binary" }),
+	);
 }
 
 function writeSqlDumpRows(
@@ -480,21 +484,26 @@ function readSqlDumpRows(filePath: string): TransferImportRows {
 }
 
 function readSqlDumpColumns(raw: string): string[] {
-	const insertMatch = /INSERT\s+INTO\s+(?:"[^"]+"|\S+)(?:\s*\.\s*(?:"[^"]+"|\S+))?\s*\(([^)]+)\)\s+VALUES/is.exec(
-		raw,
-	);
+	const insertMatch =
+		/INSERT\s+INTO\s+(?:"[^"]+"|\S+)(?:\s*\.\s*(?:"[^"]+"|\S+))?\s*\(([^)]+)\)\s+VALUES/is.exec(
+			raw,
+		);
 	if (insertMatch?.[1]) return parseSqlIdentifierList(insertMatch[1]);
 
-	const createMatch = /CREATE\s+TABLE\s+(?:"[^"]+"|\S+)(?:\s*\.\s*(?:"[^"]+"|\S+))?\s*\(([\s\S]*?)\);/i.exec(
-		raw,
-	);
+	const createMatch =
+		/CREATE\s+TABLE\s+(?:"[^"]+"|\S+)(?:\s*\.\s*(?:"[^"]+"|\S+))?\s*\(([\s\S]*?)\);/i.exec(
+			raw,
+		);
 	if (!createMatch?.[1]) return [];
 
 	return createMatch[1]
 		.split("\n")
 		.map((line) => line.trim().replace(/,$/, ""))
 		.filter((line) => line.length > 0)
-		.filter((line) => !/^(CONSTRAINT|PRIMARY|FOREIGN|UNIQUE|CHECK|EXCLUDE)\b/i.test(line))
+		.filter(
+			(line) =>
+				!/^(CONSTRAINT|PRIMARY|FOREIGN|UNIQUE|CHECK|EXCLUDE)\b/i.test(line),
+		)
 		.map((line) => parseSqlIdentifier(line))
 		.filter((column) => column.length > 0);
 }
@@ -637,10 +646,7 @@ function sanitizeColumnName(value: string): string {
 	return /^[a-z_]/.test(normalized) ? normalized : `col_${normalized}`;
 }
 
-function encodeDelimitedValue(
-	value: unknown,
-	delimiter: "," | "\t",
-): string {
+function encodeDelimitedValue(value: unknown, delimiter: "," | "\t"): string {
 	const text = stringifyCell(value);
 	const needsQuotes =
 		text.includes(delimiter) ||

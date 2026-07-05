@@ -3,10 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executeSecureReadQuery } from "./agents/database-tools.js";
-import {
-	createQcpClient,
-	QcpSdkRuntimeDependencyError,
-} from "./index.js";
+import { createQcpClient, QcpSdkRuntimeDependencyError } from "./index.js";
 import type {
 	ActiveDatabaseConnection,
 	DatabaseSchema,
@@ -34,7 +31,10 @@ describe("qcp SDK", () => {
 
 	test("answers direct schema questions from explicit SDK context", async () => {
 		const client = createQcpClient({
-			config: configWith({ provider: "ollama", databaseType: "other-postgres" }),
+			config: configWith({
+				provider: "ollama",
+				databaseType: "other-postgres",
+			}),
 			connection: connectionWith({ databaseType: "other-postgres" }),
 			schema: schemaWithTables(["users", "orders"]),
 			semanticEnabled: false,
@@ -53,7 +53,10 @@ describe("qcp SDK", () => {
 	test("throws actionable runtime dependency errors without installing by default", async () => {
 		const store = tempStore();
 		const client = createQcpClient({
-			config: configWith({ provider: "gemini", databaseType: "other-postgres" }),
+			config: configWith({
+				provider: "gemini",
+				databaseType: "other-postgres",
+			}),
 			connection: connectionWith({ databaseType: "other-postgres" }),
 			schema: schemaWithTables(["users"]),
 			packageStoreDir: store,

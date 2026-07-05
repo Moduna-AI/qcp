@@ -26,6 +26,12 @@ import {
 	securityRequestContextSchema,
 	validateSql,
 } from "@/safety/index.js";
+import { DatabaseTransferService } from "@/transfer/database-transfer-service.js";
+import type {
+	TransferExportRequest,
+	TransferImportRequest,
+	TransferResult,
+} from "@/transfer/types.js";
 import type {
 	ApprovalReason,
 	DatabaseSchema,
@@ -33,13 +39,6 @@ import type {
 	SecureQueryError,
 	SecurityRequestContext,
 } from "@/types/index.js";
-import { DatabaseTransferService } from "@/transfer/database-transfer-service.js";
-import type {
-	DatabaseTransferFormat,
-	TransferExportRequest,
-	TransferImportRequest,
-	TransferResult,
-} from "@/transfer/types.js";
 
 export type DatabaseQueryExecutor = (
 	databaseUrl: string,

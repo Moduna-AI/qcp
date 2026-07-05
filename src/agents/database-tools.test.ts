@@ -282,7 +282,11 @@ describe("shared database agent tools", () => {
 			filePath: "projects.json",
 			table: { table: "projects" },
 		});
-		const output = result as { ok: boolean; rowCount?: number; filePath?: string };
+		const output = result as {
+			ok: boolean;
+			rowCount?: number;
+			filePath?: string;
+		};
 
 		expect(output.ok).toBe(true);
 		expect(output.rowCount).toBe(1);

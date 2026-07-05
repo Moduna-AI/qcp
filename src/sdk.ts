@@ -122,15 +122,24 @@ export function createQcpClient(options: QcpClientOptions = {}): QcpClient {
 export async function installQcpSdkRuntimePackages(
 	options: Pick<
 		QcpClientOptions,
-		"config" | "connection" | "connectionName" | "packageStoreDir" | "semanticEnabled"
+		| "config"
+		| "connection"
+		| "connectionName"
+		| "packageStoreDir"
+		| "semanticEnabled"
 	> = {},
 ): Promise<void> {
 	const config = options.config ?? loadConfig();
 	const connection =
-		options.connection ?? getActiveDatabaseConnection(config, options.connectionName);
+		options.connection ??
+		getActiveDatabaseConnection(config, options.connectionName);
 	const databaseType = connection?.databaseType ?? config.databaseType;
 	const semanticEnabled = options.semanticEnabled ?? semanticStoreExists();
-	const groups = getSdkRuntimePackageGroups(config, databaseType, semanticEnabled);
+	const groups = getSdkRuntimePackageGroups(
+		config,
+		databaseType,
+		semanticEnabled,
+	);
 	for (const group of groups) {
 		const result = await installPackageGroup({
 			group,
@@ -207,12 +216,15 @@ async function askWithSdkOptions(
 function resolveSdkContext(options: QcpClientOptions): ResolvedSdkContext {
 	const config = options.config ?? loadConfig();
 	const connection =
-		options.connection ?? getActiveDatabaseConnection(config, options.connectionName);
+		options.connection ??
+		getActiveDatabaseConnection(config, options.connectionName);
 	const activeConfig = connection
 		? withActiveDatabaseConnection(config, connection)
 		: config;
 	const databaseUrl =
-		options.databaseUrl ?? connection?.databaseUrl ?? getDatabaseUrl(activeConfig);
+		options.databaseUrl ??
+		connection?.databaseUrl ??
+		getDatabaseUrl(activeConfig);
 	if (!databaseUrl) {
 		throw new QcpSdkConfigurationError(
 			"No database connection configured. Run `qcp connect` or pass `databaseUrl` and `schema` to createQcpClient().",
@@ -271,7 +283,9 @@ function auditSdkRuntimePackages(
 	readonly missingGroups: readonly PackageGroup[];
 	readonly statuses: readonly PackageGroupStatus[];
 } {
-	const statuses = groups.map((group) => getPackageGroupStatus(group, targetDir));
+	const statuses = groups.map((group) =>
+		getPackageGroupStatus(group, targetDir),
+	);
 	return {
 		statuses,
 		missingGroups: statuses

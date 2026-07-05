@@ -1,12 +1,12 @@
-import type {
-	DatabaseTransferDirection,
-	DatabaseTransferFormat,
-} from "./types.js";
+import type { PackageGroup } from "@/packages/lazy-packages.js";
 import {
 	getTransferFormatAdapter,
 	listSupportedTransferFormats,
 } from "./format-adapters.js";
-import type { PackageGroup } from "@/packages/lazy-packages.js";
+import type {
+	DatabaseTransferDirection,
+	DatabaseTransferFormat,
+} from "./types.js";
 
 const FORMAT_ALIASES: Record<string, DatabaseTransferFormat> = {
 	csv: "csv",
@@ -117,7 +117,10 @@ export async function resolveTransferIntent(
 		nextQuestion = appendTransferFormatInstruction(nextQuestion, format);
 	}
 	if (importFilePath) {
-		nextQuestion = appendTransferFilePathInstruction(nextQuestion, importFilePath);
+		nextQuestion = appendTransferFilePathInstruction(
+			nextQuestion,
+			importFilePath,
+		);
 	}
 	if (exportFilePath) {
 		nextQuestion = appendTransferOutputPathInstruction(
@@ -199,14 +202,16 @@ function detectFormat(question: string): DatabaseTransferFormat | undefined {
 }
 
 function detectFilePath(question: string): string | undefined {
-	const quoted = /["']([^"']+\.(csv|tsv|tab|json|jsonl|ndjson|parquet|db|sqlite|sqlite3|pd|pkl|pickle|sql|dump|tar))["']/i.exec(
-		question,
-	);
+	const quoted =
+		/["']([^"']+\.(csv|tsv|tab|json|jsonl|ndjson|parquet|db|sqlite|sqlite3|pd|pkl|pickle|sql|dump|tar))["']/i.exec(
+			question,
+		);
 	if (quoted?.[1]) return quoted[1];
 
-	const token = /(?:^|\s)(\.{0,2}\/?[^\s]+\.(csv|tsv|tab|json|jsonl|ndjson|parquet|db|sqlite|sqlite3|pd|pkl|pickle|sql|dump|tar))(?=\s|$)/i.exec(
-		question,
-	);
+	const token =
+		/(?:^|\s)(\.{0,2}\/?[^\s]+\.(csv|tsv|tab|json|jsonl|ndjson|parquet|db|sqlite|sqlite3|pd|pkl|pickle|sql|dump|tar))(?=\s|$)/i.exec(
+			question,
+		);
 	return token?.[1];
 }
 
@@ -225,11 +230,15 @@ function detectResource(
 	const ofMatch = /\bof\s+([a-zA-Z_][a-zA-Z0-9_$.]*)\b/i.exec(question);
 	if (ofMatch?.[1]) return ofMatch[1];
 
-	const exportMatch = /\b(?:export|dump|download|save)\s+([a-zA-Z_][a-zA-Z0-9_$.]*)\b/i.exec(
-		question,
-	);
+	const exportMatch =
+		/\b(?:export|dump|download|save)\s+([a-zA-Z_][a-zA-Z0-9_$.]*)\b/i.exec(
+			question,
+		);
 	const resource = exportMatch?.[1];
-	if (!resource || /^(data|database|db|it|this|that|everything|all)$/i.test(resource)) {
+	if (
+		!resource ||
+		/^(data|database|db|it|this|that|everything|all)$/i.test(resource)
+	) {
 		return undefined;
 	}
 	return resource;

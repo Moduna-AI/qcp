@@ -117,7 +117,12 @@ export class DatabaseTransferService {
 	): Promise<TransferResult> {
 		const filePath = this.resolveWorkspacePath(request.filePath, "import");
 		if (!existsSync(filePath)) {
-			return this.failure("import", request.format, filePath, "File not found.");
+			return this.failure(
+				"import",
+				request.format,
+				filePath,
+				"File not found.",
+			);
 		}
 
 		const detected = detectTransferFormat(filePath, request.format);
@@ -263,7 +268,9 @@ export class DatabaseTransferService {
 								.join(", ")})`,
 					)
 					.join(", ");
-				await db.unsafe(`INSERT INTO ${tableId} (${columnList}) VALUES ${values}`);
+				await db.unsafe(
+					`INSERT INTO ${tableId} (${columnList}) VALUES ${values}`,
+				);
 			}
 			return { rowCount: input.rows.length };
 		} finally {
@@ -305,7 +312,8 @@ function quoteIdentifier(identifier: string): string {
 
 function quoteLiteral(value: unknown): string {
 	if (value === null || typeof value === "undefined") return "NULL";
-	const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+	const text =
+		typeof value === "object" ? JSON.stringify(value) : String(value);
 	return `'${text.replace(/'/g, "''")}'`;
 }
 

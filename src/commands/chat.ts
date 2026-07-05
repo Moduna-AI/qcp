@@ -42,14 +42,6 @@ import {
 import { loadSchemaForConnection } from "@/schema/index.js";
 import { semanticStoreExists } from "@/semantic/store.js";
 import {
-	resolveTransferIntent,
-	supportedTransferFormatChoices,
-} from "@/transfer/intent.js";
-import type {
-	DatabaseTransferDirection,
-	DatabaseTransferFormat,
-} from "@/transfer/types.js";
-import {
 	initTelemetry,
 	shutdownTelemetry,
 	trackActive,
@@ -58,6 +50,14 @@ import {
 	trackQuery,
 	trackQueryRejected,
 } from "@/telemetry/index.js";
+import {
+	resolveTransferIntent,
+	supportedTransferFormatChoices,
+} from "@/transfer/intent.js";
+import type {
+	DatabaseTransferDirection,
+	DatabaseTransferFormat,
+} from "@/transfer/types.js";
 import type { ApprovalReason, DatabaseSchema } from "@/types/index.js";
 
 const HELP_COMMANDS = new Set(["/help", "?", "help"]);
@@ -338,7 +338,9 @@ async function promptForExportResource(): Promise<string | undefined> {
 
 async function promptForTransferFormat(
 	direction: DatabaseTransferDirection,
-): Promise<ReturnType<typeof supportedTransferFormatChoices>[number] | undefined> {
+): Promise<
+	ReturnType<typeof supportedTransferFormatChoices>[number] | undefined
+> {
 	const choices = supportedTransferFormatChoices(direction);
 	const { format } = await inquirer.prompt<{
 		format: ReturnType<typeof supportedTransferFormatChoices>[number];
@@ -417,7 +419,8 @@ async function _handleQuestion(
 
 	const spinner = ora("Thinking...").start();
 	try {
-		const response = await session.supervisor.generateResponse(questionForAgent);
+		const response =
+			await session.supervisor.generateResponse(questionForAgent);
 		spinner.succeed(response.direct ? "Ready" : "Done");
 		printChatAnswer(response.text);
 

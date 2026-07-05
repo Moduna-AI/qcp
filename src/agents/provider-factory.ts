@@ -1,15 +1,18 @@
 import type { ToolsInput } from "@mastra/core/agent";
-import type { ActiveDatabaseConnection } from "@/types/index.js";
 import type { AuditContext } from "@/logger/audit.js";
+import { saveSchemaForConnection, scanSchema } from "@/schema/index.js";
 import {
 	CliSemanticQuestionAdapter,
 	HumanSemanticQuestionService,
 	McpSemanticQuestionAdapter,
 } from "@/semantic/question-service.js";
-import { saveSchemaForConnection, scanSchema } from "@/schema/index.js";
 import { SemanticStore, semanticStoreExists } from "@/semantic/store.js";
 import { createSemanticTools } from "@/semantic/tools.js";
-import type { DatabaseSchema, QcpConfig } from "@/types/index.js";
+import type {
+	ActiveDatabaseConnection,
+	DatabaseSchema,
+	QcpConfig,
+} from "@/types/index.js";
 import type { AbstractDatabaseAgent } from "./database-agent.js";
 import {
 	createDatabaseTools,

@@ -1,27 +1,27 @@
 export {
-	auditPackageGroups,
-	auditProviderRuntimePackages,
-	ensurePackageGroups,
-	type EnsurePackageGroupsOptions,
-	type PackageGroupsAudit,
-} from "./packages/runtime.js";
-export {
 	formatInstallCommand,
 	getPackageGroupStatus,
 	getPackageStoreDir,
 	getPackageStoreManifestPath,
+	type InstallPackageGroupOptions,
 	installAllPackageGroups,
 	installPackageGroup,
 	listPackageGroupStatuses,
-	type InstallPackageGroupOptions,
 	MissingLazyPackageError,
+	PACKAGE_GROUPS,
 	type PackageCommandResult,
 	type PackageCommandRunner,
 	type PackageGroup,
 	type PackageGroupStatus,
-	PACKAGE_GROUPS,
 	providerPackageGroup,
 	requirePackageGroup,
 	resolveAvailablePackage,
 	resolvePackageFromStore,
 } from "./packages/lazy-packages.js";
+export {
+	auditPackageGroups,
+	auditProviderRuntimePackages,
+	type EnsurePackageGroupsOptions,
+	ensurePackageGroups,
+	type PackageGroupsAudit,
+} from "./packages/runtime.js";

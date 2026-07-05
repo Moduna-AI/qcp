@@ -30,14 +30,6 @@ import { classifyPromptViolation } from "@/safety/index.js";
 import { loadSchemaForConnection, schemaToContext } from "@/schema/index.js";
 import { semanticStoreExists } from "@/semantic/store.js";
 import {
-	resolveTransferIntent,
-	supportedTransferFormatChoices,
-} from "@/transfer/intent.js";
-import type {
-	DatabaseTransferDirection,
-	DatabaseTransferFormat,
-} from "@/transfer/types.js";
-import {
 	initTelemetry,
 	shutdownTelemetry,
 	trackActive,
@@ -46,6 +38,14 @@ import {
 	trackQuery,
 	trackQueryRejected,
 } from "@/telemetry/index.js";
+import {
+	resolveTransferIntent,
+	supportedTransferFormatChoices,
+} from "@/transfer/intent.js";
+import type {
+	DatabaseTransferDirection,
+	DatabaseTransferFormat,
+} from "@/transfer/types.js";
 import type {
 	ApprovalReason,
 	DatabaseSchema,
@@ -297,7 +297,9 @@ async function promptForExportResource(): Promise<string | undefined> {
 
 async function promptForTransferFormat(
 	direction: DatabaseTransferDirection,
-): Promise<ReturnType<typeof supportedTransferFormatChoices>[number] | undefined> {
+): Promise<
+	ReturnType<typeof supportedTransferFormatChoices>[number] | undefined
+> {
 	const choices = supportedTransferFormatChoices(direction);
 	const { format } = await inquirer.prompt<{
 		format: ReturnType<typeof supportedTransferFormatChoices>[number];
