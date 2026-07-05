@@ -52,6 +52,11 @@ describe("qcp supervisor agent", () => {
 		expect(supervisor.getSubAgents().database.getTools()).toHaveProperty(
 			"qcp_import_database_data",
 		);
+		const supervisorTools = await supervisor.getAgent().listTools();
+		expect(supervisorTools).toHaveProperty("qcp_read_config_context");
+		expect(supervisor.getSubAgents().database.getTools()).not.toHaveProperty(
+			"qcp_read_config_context",
+		);
 	});
 
 	test("answers capability chat without invoking a model or SQL pipeline", async () => {

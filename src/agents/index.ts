@@ -1,4 +1,10 @@
 export {
+	buildConfigContext,
+	type ConfigContext,
+	createConfigTools,
+	redactDatabaseUrl,
+} from "./config-tools.js";
+export {
 	AbstractDatabaseAgent,
 	type DatabaseAgentConfig,
 	type DatabaseAgentType,

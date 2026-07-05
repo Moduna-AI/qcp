@@ -7,6 +7,7 @@ import {
 	sanitizeSensitiveData,
 } from "@/safety/index.js";
 import type { DatabaseSchema, QcpConfig } from "@/types/index.js";
+import { createConfigTools } from "./config-tools.js";
 import type { AbstractDatabaseAgent } from "./database-agent.js";
 import type { DatabaseToolApprovalHandler } from "./database-tools.js";
 import { createMastraModelConfig } from "./model-config.js";
@@ -84,6 +85,7 @@ export class QcpSupervisorAgent {
 				"Coordinates qcp database subagents and answers conversational database-assistant questions.",
 			instructions: this.buildInstructions(),
 			model: createMastraModelConfig(options.config),
+			tools: createConfigTools(),
 			agents: {
 				database: this.databaseAgent.getAgent(),
 			},
@@ -148,6 +150,9 @@ export class QcpSupervisorAgent {
 		return [
 			"You are qcp, a conversational database assistant.",
 			"Answer normal chat and capability questions directly. Do not delegate unless the user asks for database facts, examples, analysis, aggregations, or query results.",
+			"Use qcp_read_config_context directly for questions about qcp configuration, connected databases, the active database, schema indexing status, provider/model settings, safety settings, telemetry, or which CLI command changes a setting.",
+			"Never delegate qcp configuration or database-connection audit questions to the database subagent.",
+			"The qcp_read_config_context tool is read-only. If a user asks to add, edit, remove, or switch database connections, use the tool for current state when useful and then recommend the relevant CLI command instead of claiming to change config.",
 			"Delegate database import and export requests to the database subagent. Import/export is supported through tools only; do not invent file contents or claim a transfer completed without tool output.",
 			"Delegate database-specific work to the database subagent. Use one delegation for a database question unless the first delegation clearly fails to answer.",
 			"Never ask the database subagent to perform INSERT, UPDATE, DELETE, DDL, administrative operations, privilege changes, or destructive work, except for qcp_import_database_data when the user explicitly asks to import data and the tool creates a new table.",
