@@ -35,6 +35,37 @@ describe("Amazon Marketing Cloud results", () => {
 		expect(result.fields).toEqual(["id"]);
 	});
 
+	test("combines multiple result files for stdout", () => {
+		const result = parseAmazonMarketingCloudResults(
+			[
+				{
+					url: "https://example.test/result-1.csv",
+					body: "campaign_id,users\ncamp1,42",
+					kind: "result",
+				},
+				{
+					url: "https://example.test/metadata.json",
+					body: "{}",
+					kind: "metadata",
+				},
+				{
+					url: "https://example.test/result-2.json",
+					body: JSON.stringify([{ campaign_id: "camp2", purchases: 7 }]),
+					kind: "result",
+				},
+			],
+			123,
+			50,
+		);
+
+		expect(result.rowCount).toBe(2);
+		expect(result.rows).toEqual([
+			{ campaign_id: "camp1", users: "42" },
+			{ campaign_id: "camp2", purchases: 7 },
+		]);
+		expect(result.fields).toEqual(["campaign_id", "users", "purchases"]);
+	});
+
 	test("writes raw result files to an export directory", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "qcp-amc-results-"));
 		const files = await exportAmazonMarketingCloudFiles(

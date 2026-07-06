@@ -7,7 +7,7 @@
  */
 
 import chalk from "chalk";
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import { printBanner } from "@/output/index.js";
 import { QCP_FULL_NAME, QCP_REPO, QCP_VERSION } from "@/version.js";
 
@@ -388,7 +388,11 @@ program
 	.option("--since <datetime>", "For AMC, explicit time window start")
 	.option("--until <datetime>", "For AMC, explicit time window end")
 	.option("--time-zone <iana-zone>", "For AMC, explicit time window timezone")
-	.option("--limit <rows>", "For AMC, stdout row limit", parseInt)
+	.option(
+		"--limit <rows>",
+		"For AMC, stdout row limit",
+		parsePositiveIntegerOption,
+	)
 	.addHelpText(
 		"after",
 		`
@@ -433,6 +437,14 @@ ${chalk.bold("Examples:")}
 			});
 		},
 	);
+
+function parsePositiveIntegerOption(value: string): number {
+	const parsed = Number.parseInt(value, 10);
+	if (!Number.isInteger(parsed) || parsed < 1 || String(parsed) !== value) {
+		throw new InvalidArgumentError("Expected a positive integer.");
+	}
+	return parsed;
+}
 
 // ─── chat ─────────────────────────────────────────────────────────────────────
 

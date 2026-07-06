@@ -19,20 +19,25 @@ export function parseAmazonMarketingCloudResults(
 	executionTimeMs: number,
 	limit: number,
 ): QueryResult {
-	const resultFile = files.find((file) => file.kind === "result");
-	if (!resultFile) {
+	const rows = files
+		.filter((file) => file.kind === "result")
+		.flatMap((file) =>
+			parseResultRows(file.body, inferFileExtension(file.url)),
+		);
+	if (rows.length === 0) {
 		return { rows: [], rowCount: 0, fields: [], executionTimeMs };
 	}
 
-	const rows = parseResultRows(
-		resultFile.body,
-		inferFileExtension(resultFile.url),
-	);
-	const fields = rows[0] ? Object.keys(rows[0]) : [];
+	const fieldSet = new Set<string>();
+	for (const row of rows) {
+		for (const field of Object.keys(row)) {
+			fieldSet.add(field);
+		}
+	}
 	return {
 		rows: rows.slice(0, limit),
 		rowCount: rows.length,
-		fields,
+		fields: [...fieldSet],
 		executionTimeMs,
 	};
 }

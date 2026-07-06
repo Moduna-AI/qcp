@@ -19,6 +19,17 @@ describe("Amazon Marketing Cloud SQL safety", () => {
 		});
 	});
 
+	test("does not treat quoted text as executable SQL", () => {
+		expect(
+			validateAmazonMarketingCloudSql(
+				"SELECT ';' AS separator, 'delete' AS label, \"update\" FROM impressions;",
+			),
+		).toMatchObject({
+			ok: true,
+			sql: "SELECT ';' AS separator, 'delete' AS label, \"update\" FROM impressions",
+		});
+	});
+
 	test("rejects comments, multiple statements, and write/admin keywords", () => {
 		expect(
 			validateAmazonMarketingCloudSql(

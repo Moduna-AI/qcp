@@ -18,26 +18,41 @@ export function validateAmazonMarketingCloudSql(
 	sql: string,
 ): AmcSqlValidationResult {
 	const trimmed = sql.trim();
+	const sanitized = maskQuotedSql(trimmed);
 	const errors: string[] = [];
 
 	if (!trimmed) {
 		errors.push("SQL is empty.");
 	}
 
-	if (/--|\/\*|\*\//.test(trimmed)) {
+	if (/--|\/\*|\*\//.test(sanitized)) {
 		errors.push("SQL comments are not allowed for AMC execution.");
 	}
 
-	const withoutTrailingSemicolon = trimmed.replace(/;\s*$/, "");
-	if (withoutTrailingSemicolon.includes(";")) {
+	const semicolonIndexes = findOutsideSemicolonIndexes(sanitized);
+	const hasTrailingStatementTerminator =
+		semicolonIndexes.length === 1 && sanitized.trimEnd().endsWith(";");
+	if (
+		semicolonIndexes.length > 1 ||
+		(semicolonIndexes.length === 1 && !hasTrailingStatementTerminator)
+	) {
 		errors.push("Only one SQL statement is allowed.");
 	}
 
-	if (!/^(SELECT|WITH)\b/i.test(withoutTrailingSemicolon)) {
+	const withoutTrailingSemicolon = hasTrailingStatementTerminator
+		? trimmed.replace(/;\s*$/, "")
+		: trimmed;
+	const sanitizedWithoutTrailingSemicolon = hasTrailingStatementTerminator
+		? sanitized.replace(/;\s*$/, "")
+		: sanitized;
+
+	if (!/^(SELECT|WITH)\b/i.test(sanitizedWithoutTrailingSemicolon.trim())) {
 		errors.push("AMC queries must start with SELECT or WITH.");
 	}
 
-	const forbidden = forbiddenKeywordPattern.exec(withoutTrailingSemicolon);
+	const forbidden = forbiddenKeywordPattern.exec(
+		sanitizedWithoutTrailingSemicolon,
+	);
 	if (forbidden) {
 		errors.push(`Forbidden AMC SQL keyword: ${forbidden[1].toUpperCase()}.`);
 	}
@@ -55,4 +70,45 @@ export function assertValidAmazonMarketingCloudSql(sql: string): string {
 		throw new AmcSqlValidationError(result);
 	}
 	return result.sql;
+}
+
+function maskQuotedSql(sql: string): string {
+	let masked = "";
+	let quote: "'" | '"' | "`" | undefined;
+
+	for (let index = 0; index < sql.length; index += 1) {
+		const char = sql[index];
+		const next = sql[index + 1];
+
+		if (quote) {
+			masked += " ";
+			if (char === quote) {
+				if (next === quote) {
+					masked += " ";
+					index += 1;
+				} else {
+					quote = undefined;
+				}
+			}
+			continue;
+		}
+
+		if (char === "'" || char === '"' || char === "`") {
+			quote = char;
+			masked += " ";
+			continue;
+		}
+
+		masked += char;
+	}
+
+	return masked;
+}
+
+function findOutsideSemicolonIndexes(maskedSql: string): number[] {
+	const indexes: number[] = [];
+	for (let index = 0; index < maskedSql.length; index += 1) {
+		if (maskedSql[index] === ";") indexes.push(index);
+	}
+	return indexes;
 }
