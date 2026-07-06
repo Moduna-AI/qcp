@@ -1,4 +1,10 @@
 export {
+	AmazonMarketingCloudAgent,
+	type AmazonMarketingCloudAgentConfig,
+	type CreateAmazonMarketingCloudToolsOptions,
+	createAmazonMarketingCloudTools,
+} from "./amazon-marketing-cloud-agent.js";
+export {
 	buildConfigContext,
 	type ConfigContext,
 	createConfigTools,

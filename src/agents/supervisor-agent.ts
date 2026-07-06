@@ -296,7 +296,7 @@ function buildDatabaseDelegationPrompt(prompt: string): string {
 DATABASE DELEGATION REQUEST:
 ${prompt}
 
-Use only qcp read-only database tools. Validate SQL before execution. Do not expose raw sensitive values, credentials, tokens, secrets, or personal data. Return a concise answer with relevant assumptions and limitations.
+Use only qcp read-only provider tools for the active database type. Validate SQL before execution. Do not expose raw sensitive values, credentials, tokens, secrets, or personal data. Return a concise answer with relevant assumptions and limitations.
 
 If semantic tools are available, retrieve semantic context before mapping business terms to tables or columns. Missing semantic enrichment is a limitation to report or request; do not invent business meaning.
 `.trim();

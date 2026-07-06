@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import "dotenv/config";
@@ -38,10 +44,26 @@ export const DATABASE_TYPES = [
 	"neon",
 	"supabase",
 	"oracle-postgres",
+	"amazon-marketing-cloud",
 	"other-postgres",
 ] as const satisfies readonly DatabaseType[];
 
 const DatabaseTypeSchema = z.enum(DATABASE_TYPES);
+
+const AmazonMarketingCloudRegionSchema = z.enum(["NA", "EU", "FE"]);
+
+const AmazonMarketingCloudConnectionConfigSchema = z.object({
+	region: AmazonMarketingCloudRegionSchema.default("NA"),
+	apiBaseUrl: z.string().url().default("https://advertising-api.amazon.com"),
+	instanceId: z.string().min(1),
+	clientId: z.string().min(1),
+	clientSecret: z.string().min(1),
+	refreshToken: z.string().min(1),
+	accessToken: z.string().optional(),
+	accessTokenExpiresAt: z.string().optional(),
+	advertiserId: z.string().min(1),
+	marketplaceId: z.string().min(1),
+});
 
 const DatabaseConnectionConfigSchema = z.object({
 	id: z.string().min(1),
@@ -50,6 +72,7 @@ const DatabaseConnectionConfigSchema = z.object({
 	databaseUrl: z.string().min(1),
 	prismaSchemaPath: z.string().optional(),
 	prismaDatasourceName: z.string().optional(),
+	amazonMarketingCloud: AmazonMarketingCloudConnectionConfigSchema.optional(),
 	createdAt: z.string().default(() => new Date().toISOString()),
 	updatedAt: z.string().default(() => new Date().toISOString()),
 });
@@ -163,6 +186,7 @@ export function saveConfig(config: Partial<QcpConfig>): QcpConfig {
 	const merged = { ...current, ...config };
 	const validated = normalizeConfig(QcpConfigSchema.parse(merged) as QcpConfig);
 	writeFileSync(CONFIG_PATH, JSON.stringify(validated, null, 2));
+	hardenConfigFilePermissions();
 	return validated;
 }
 
@@ -241,6 +265,10 @@ export function setApiKey(provider: ProviderName, key: string): void {
 export function getDatabaseUrl(config: QcpConfig): string | undefined {
 	const active = getActiveDatabaseConnection(config);
 	if (active) return active.databaseUrl;
+
+	if (config.databaseType === "amazon-marketing-cloud") {
+		return process.env.QCP_AMC_API_BASE_URL ?? config.databaseUrl;
+	}
 
 	if (config.databaseType === "prisma-postgres") {
 		return (
@@ -334,6 +362,9 @@ export function redactConfig(config: QcpConfig): Record<string, unknown> {
 			databaseUrl: "[REDACTED]",
 			prismaSchemaPath: connection.prismaSchemaPath,
 			prismaDatasourceName: connection.prismaDatasourceName,
+			amazonMarketingCloud: connection.amazonMarketingCloud
+				? redactAmazonMarketingCloudConfig(connection.amazonMarketingCloud)
+				: undefined,
 			createdAt: connection.createdAt,
 			updatedAt: connection.updatedAt,
 		})),
@@ -353,5 +384,30 @@ export function redactConfig(config: QcpConfig): Record<string, unknown> {
 			anthropic: config.apiKeys.anthropic ? "[CONFIGURED]" : undefined,
 		},
 		ollamaHost: config.ollamaHost,
+	};
+}
+
+function hardenConfigFilePermissions(): void {
+	try {
+		chmodSync(CONFIG_PATH, 0o600);
+	} catch {
+		// Best effort only; some filesystems do not support POSIX permissions.
+	}
+}
+
+function redactAmazonMarketingCloudConfig(
+	config: NonNullable<DatabaseConnectionConfig["amazonMarketingCloud"]>,
+): Record<string, unknown> {
+	return {
+		region: config.region,
+		apiBaseUrl: config.apiBaseUrl,
+		instanceId: config.instanceId ? "[CONFIGURED]" : undefined,
+		clientId: config.clientId ? "[CONFIGURED]" : undefined,
+		clientSecret: config.clientSecret ? "[CONFIGURED]" : undefined,
+		refreshToken: config.refreshToken ? "[CONFIGURED]" : undefined,
+		accessToken: config.accessToken ? "[CONFIGURED]" : undefined,
+		accessTokenExpiresAt: config.accessTokenExpiresAt,
+		advertiserId: config.advertiserId ? "[CONFIGURED]" : undefined,
+		marketplaceId: config.marketplaceId,
 	};
 }

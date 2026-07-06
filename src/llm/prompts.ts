@@ -25,7 +25,7 @@ export function isPromptViolationError(
 // ─── System prompts ───────────────────────────────────────────────────────────
 
 export const SQL_SYSTEM_PROMPT =
-	`You are an expert PostgreSQL database analyst for qcp (Query Companion).
+	`You are an expert database analyst for qcp (Query Companion). Use PostgreSQL by default, unless the user prompt explicitly names another SQL dialect such as Amazon Marketing Cloud Presto SQL.
 
 CRITICAL SAFETY RULES — you MUST follow these without exception:
 1. ONLY generate SELECT, WITH (CTEs), or EXPLAIN statements.
@@ -43,7 +43,7 @@ QUERY QUALITY RULES:
 
 RESPONSE FORMAT — always use this exact format:
 <sql>
-[Your SQL query here — valid PostgreSQL]
+[Your SQL query here — valid for the requested SQL dialect]
 </sql>
 <explanation>
 [2-4 sentences explaining what the query does, which tables/joins are used, and any assumptions made]
@@ -56,15 +56,21 @@ export function buildSqlPrompt(
 	schema: DatabaseSchema,
 ): string {
 	const schemaContext = schemaToContext(schema);
+	const dialect = schema.databaseName.startsWith("Amazon Marketing Cloud")
+		? "Amazon Marketing Cloud Presto SQL"
+		: "PostgreSQL";
 
 	return `
 DATABASE SCHEMA:
 ${schemaContext}
 
+SQL DIALECT:
+${dialect}
+
 USER QUESTION:
 ${question}
 
-Generate a safe, read-only PostgreSQL query to answer this question.
+Generate a safe, read-only ${dialect} query to answer this question.
 `.trim();
 }
 

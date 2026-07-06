@@ -118,6 +118,25 @@ async function checkDatabase(
 		value: `${connection.name} (${connection.databaseType})`,
 	});
 
+	if (connection.databaseType === "amazon-marketing-cloud") {
+		checks.push({
+			name: "Connected",
+			status: connection.amazonMarketingCloud ? "healthy" : "error",
+			value: connection.amazonMarketingCloud
+				? "AMC profile configured"
+				: undefined,
+			message: connection.amazonMarketingCloud
+				? undefined
+				: "AMC credentials missing. Run: qcp connect --type amazon-marketing-cloud",
+		});
+		checks.push({
+			name: "Read-only enforcement",
+			status: "healthy",
+			value: "AMC SELECT/WITH validation",
+		});
+		return withSchemaChecks(checks, connection);
+	}
+
 	const result = await testConnection(connection.databaseUrl);
 
 	if (result.connected) {
@@ -140,7 +159,13 @@ async function checkDatabase(
 		return checks;
 	}
 
-	// Check schema
+	return withSchemaChecks(checks, connection);
+}
+
+function withSchemaChecks(
+	checks: DoctorCheck[],
+	connection: NonNullable<ReturnType<typeof getActiveDatabaseConnection>>,
+): DoctorCheck[] {
 	if (schemaCatalogHasConnection(connection.id)) {
 		try {
 			const { schema } = loadSchemaForConnection(connection);

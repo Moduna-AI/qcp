@@ -78,14 +78,22 @@ program
 
 program
 	.command("connect [database-url]")
-	.description("Connect to a PostgreSQL-compatible database")
+	.description("Connect to a database or Amazon Marketing Cloud profile")
 	.option("--name <alias>", "Connection alias, such as prod or staging")
 	.option(
 		"--type <database-type>",
-		"Database type: prisma-postgres, neon, supabase, oracle-postgres, other-postgres",
+		"Database type: prisma-postgres, neon, supabase, oracle-postgres, amazon-marketing-cloud, other-postgres",
 	)
 	.option("--schema <path>", "Local Prisma schema.prisma path")
 	.option("--datasource <name>", "Prisma datasource name")
+	.option("--region <region>", "AMC region: NA, EU, or FE")
+	.option("--api-base-url <url>", "Amazon Ads API base URL for AMC")
+	.option("--instance-id <id>", "AMC instance ID")
+	.option("--client-id <id>", "Amazon Ads API client ID")
+	.option("--client-secret <secret>", "Amazon Ads API client secret")
+	.option("--refresh-token <token>", "LWA refresh token")
+	.option("--advertiser-id <id>", "AMC account / advertiser ID")
+	.option("--marketplace-id <id>", "Amazon marketplace ID")
 	.addHelpText(
 		"after",
 		`
@@ -94,6 +102,7 @@ ${chalk.bold("Example:")}
   qcp connect --name prod postgres://readonly_user:password@host:5432/mydb
   qcp connect --name staging --type neon postgres://readonly_user:password@host/db
   qcp connect --name prod --type prisma-postgres --schema prisma/schema.prisma --datasource db postgres://readonly_user:password@host/db
+  qcp connect --name amc --type amazon-marketing-cloud --instance-id amc-instance --client-id client --client-secret secret --refresh-token refresh --advertiser-id advertiser --marketplace-id ATVPDKIKX0DER
 
 ${chalk.bold("Tip:")} Create a read-only role for maximum safety:
   CREATE ROLE qcp_readonly;
@@ -110,6 +119,14 @@ ${chalk.bold("Tip:")} Create a read-only role for maximum safety:
 				type?: string;
 				schema?: string;
 				datasource?: string;
+				region?: string;
+				apiBaseUrl?: string;
+				instanceId?: string;
+				clientId?: string;
+				clientSecret?: string;
+				refreshToken?: string;
+				advertiserId?: string;
+				marketplaceId?: string;
 			},
 		) => {
 			const { connectCommand } = await import("../commands/connect.js");
@@ -118,6 +135,14 @@ ${chalk.bold("Tip:")} Create a read-only role for maximum safety:
 				type: options.type,
 				schema: options.schema,
 				datasource: options.datasource,
+				region: options.region,
+				apiBaseUrl: options.apiBaseUrl,
+				instanceId: options.instanceId,
+				clientId: options.clientId,
+				clientSecret: options.clientSecret,
+				refreshToken: options.refreshToken,
+				advertiserId: options.advertiserId,
+				marketplaceId: options.marketplaceId,
 			});
 		},
 	);
@@ -334,6 +359,20 @@ semantic
 		await semanticMcpCommand({ database: options.database });
 	});
 
+// ─── amc ─────────────────────────────────────────────────────────────────────
+
+const amc = program
+	.command("amc")
+	.description("Amazon Marketing Cloud async execution helpers");
+
+amc
+	.command("status <workflowExecutionId>")
+	.description("Show the status of an AMC workflow execution")
+	.action(async (workflowExecutionId: string) => {
+		const { amcStatusCommand } = await import("../commands/amc.js");
+		await amcStatusCommand(workflowExecutionId);
+	});
+
 // ─── ask ──────────────────────────────────────────────────────────────────────
 
 program
@@ -344,6 +383,12 @@ program
 	.option("--debug", "Show raw LLM output, prompts, and EXPLAIN plan")
 	.option("--no-safe-mode", "Skip human approval prompts (advanced users only)")
 	.option("--yes", "Auto-approve all safety prompts")
+	.option("--export <file-or-dir>", "For AMC, write raw result files locally")
+	.option("--dry-run", "For AMC, validate generated SQL without execution")
+	.option("--since <datetime>", "For AMC, explicit time window start")
+	.option("--until <datetime>", "For AMC, explicit time window end")
+	.option("--time-zone <iana-zone>", "For AMC, explicit time window timezone")
+	.option("--limit <rows>", "For AMC, stdout row limit", parseInt)
 	.addHelpText(
 		"after",
 		`
@@ -352,6 +397,7 @@ ${chalk.bold("Examples:")}
   qcp ask "Total revenue by product category" --metrics
   qcp ask "Show me users who signed up this week" --verbose
   qcp ask "Largest orders today" --yes
+  qcp ask "Show non-purchasers over 30 days" --export amc-results/
 `,
 	)
 	.action(
@@ -363,6 +409,12 @@ ${chalk.bold("Examples:")}
 				debug?: boolean;
 				safeMode?: boolean;
 				yes?: boolean;
+				export?: string;
+				dryRun?: boolean;
+				since?: string;
+				until?: string;
+				timeZone?: string;
+				limit?: number;
 			},
 		) => {
 			const { askCommand } = await import("../commands/ask.js");
@@ -372,6 +424,12 @@ ${chalk.bold("Examples:")}
 				debug: options.debug,
 				safeMode: options.safeMode !== false,
 				noConfirm: options.yes,
+				exportPath: options.export,
+				dryRun: options.dryRun,
+				since: options.since,
+				until: options.until,
+				timeZone: options.timeZone,
+				limit: options.limit,
 			});
 		},
 	);

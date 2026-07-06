@@ -1,6 +1,7 @@
 import { v7 as uuidv7 } from "uuid";
 import type {
 	ActiveDatabaseConnection,
+	AmazonMarketingCloudConnectionConfig,
 	DatabaseConnectionConfig,
 	DatabaseType,
 	QcpConfig,
@@ -12,6 +13,7 @@ export interface UpsertDatabaseConnectionInput {
 	readonly databaseUrl: string;
 	readonly prismaSchemaPath?: string;
 	readonly prismaDatasourceName?: string;
+	readonly amazonMarketingCloud?: AmazonMarketingCloudConnectionConfig;
 }
 
 export interface UpdateDatabaseConnectionInput {
@@ -20,6 +22,7 @@ export interface UpdateDatabaseConnectionInput {
 	readonly databaseUrl?: string;
 	readonly prismaSchemaPath?: string;
 	readonly prismaDatasourceName?: string;
+	readonly amazonMarketingCloud?: AmazonMarketingCloudConnectionConfig;
 }
 
 export interface DatabaseConnectionRegistrySnapshot {
@@ -91,6 +94,8 @@ export class DatabaseConnectionRegistry {
 			databaseUrl: resolveDatabaseUrlForConnection(connection),
 			prismaSchemaPath: connection.prismaSchemaPath,
 			prismaDatasourceName: connection.prismaDatasourceName,
+			amazonMarketingCloud:
+				resolveAmazonMarketingCloudConfigForConnection(connection),
 		};
 	}
 
@@ -108,6 +113,10 @@ export class DatabaseConnectionRegistry {
 			databaseUrl: input.databaseUrl,
 			prismaSchemaPath: input.prismaSchemaPath,
 			prismaDatasourceName: input.prismaDatasourceName,
+			amazonMarketingCloud:
+				input.databaseType === "amazon-marketing-cloud"
+					? input.amazonMarketingCloud
+					: undefined,
 			createdAt: existing?.createdAt ?? now,
 			updatedAt: now,
 		};
@@ -170,6 +179,10 @@ export class DatabaseConnectionRegistry {
 				databaseType === "prisma-postgres"
 					? (input.prismaDatasourceName ?? existing.prismaDatasourceName)
 					: undefined,
+			amazonMarketingCloud:
+				databaseType === "amazon-marketing-cloud"
+					? (input.amazonMarketingCloud ?? existing.amazonMarketingCloud)
+					: undefined,
 			updatedAt: new Date().toISOString(),
 		};
 
@@ -219,6 +232,14 @@ export function isValidDatabaseAlias(alias: string): boolean {
 export function resolveDatabaseUrlForConnection(
 	connection: DatabaseConnectionConfig,
 ): string {
+	if (connection.databaseType === "amazon-marketing-cloud") {
+		return (
+			process.env.QCP_AMC_API_BASE_URL ??
+			connection.amazonMarketingCloud?.apiBaseUrl ??
+			connection.databaseUrl
+		);
+	}
+
 	if (connection.databaseType === "prisma-postgres") {
 		return (
 			process.env.PRISMA_DATABASE_URL ??
@@ -233,4 +254,43 @@ export function resolveDatabaseUrlForConnection(
 		process.env.DATABASE_URL ??
 		process.env.QCP_DATABASE_URL
 	);
+}
+
+export function resolveAmazonMarketingCloudConfigForConnection(
+	connection: DatabaseConnectionConfig,
+): AmazonMarketingCloudConnectionConfig | undefined {
+	if (connection.databaseType !== "amazon-marketing-cloud") return undefined;
+	const configured = connection.amazonMarketingCloud;
+	if (!configured) return undefined;
+
+	return {
+		region: parseAmazonMarketingCloudRegion(
+			process.env.QCP_AMC_REGION ?? configured.region,
+			configured.region,
+		),
+		apiBaseUrl:
+			process.env.QCP_AMC_API_BASE_URL ??
+			configured.apiBaseUrl ??
+			connection.databaseUrl,
+		instanceId: process.env.QCP_AMC_INSTANCE_ID ?? configured.instanceId,
+		clientId: process.env.QCP_AMC_CLIENT_ID ?? configured.clientId,
+		clientSecret: process.env.QCP_AMC_CLIENT_SECRET ?? configured.clientSecret,
+		refreshToken: process.env.QCP_AMC_REFRESH_TOKEN ?? configured.refreshToken,
+		accessToken: process.env.QCP_AMC_ACCESS_TOKEN ?? configured.accessToken,
+		accessTokenExpiresAt: configured.accessTokenExpiresAt,
+		advertiserId: process.env.QCP_AMC_ADVERTISER_ID ?? configured.advertiserId,
+		marketplaceId:
+			process.env.QCP_AMC_MARKETPLACE_ID ?? configured.marketplaceId,
+	};
+}
+
+function parseAmazonMarketingCloudRegion(
+	value: string,
+	fallback: AmazonMarketingCloudConnectionConfig["region"],
+): AmazonMarketingCloudConnectionConfig["region"] {
+	const normalized = value.trim().toUpperCase();
+	if (normalized === "NA" || normalized === "EU" || normalized === "FE") {
+		return normalized;
+	}
+	return fallback;
 }

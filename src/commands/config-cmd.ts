@@ -35,10 +35,23 @@ export function configShowCommand(): void {
 		console.log(`  Connections:  ${config.databaseConnections.length}`);
 		for (const connection of config.databaseConnections) {
 			const marker = connection.id === active?.id ? "*" : "-";
+			const location =
+				connection.databaseType === "amazon-marketing-cloud"
+					? `[amc ${connection.amazonMarketingCloud?.region ?? "region"}]`
+					: "[url redacted]";
 			console.log(
-				`    ${marker} ${chalk.cyan(connection.name)} ${chalk.dim(connection.databaseType)} ${chalk.dim("[url redacted]")}`,
+				`    ${marker} ${chalk.cyan(connection.name)} ${chalk.dim(connection.databaseType)} ${chalk.dim(location)}`,
 			);
 		}
+	}
+	if (active?.amazonMarketingCloud) {
+		console.log(
+			`  AMC region:   ${chalk.dim(active.amazonMarketingCloud.region)}`,
+		);
+		console.log(`  AMC instance: ${chalk.dim("[configured]")}`);
+		console.log(
+			`  Marketplace:  ${chalk.dim(active.amazonMarketingCloud.marketplaceId)}`,
+		);
 	}
 	if (active?.prismaSchemaPath) {
 		console.log(`  Prisma file:  ${chalk.dim(active.prismaSchemaPath)}`);
@@ -91,7 +104,7 @@ export function configSetCommand(key: string, value: string): void {
 		if (!isDatabaseType(value)) {
 			printError(
 				`Invalid database type: ${value}`,
-				"Valid types: prisma-postgres, neon, supabase, oracle-postgres, other-postgres",
+				"Valid types: prisma-postgres, neon, supabase, oracle-postgres, amazon-marketing-cloud, other-postgres",
 			);
 			process.exit(1);
 		}

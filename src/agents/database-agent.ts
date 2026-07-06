@@ -8,6 +8,7 @@ export type DatabaseAgentType =
 	| "supabase"
 	| "neon"
 	| "oracle-postgres"
+	| "amazon-marketing-cloud"
 	| (string & {});
 
 export interface DatabaseAgentConfig<TAgentId extends string = string> {

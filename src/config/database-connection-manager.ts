@@ -1,3 +1,4 @@
+import { scanAmazonMarketingCloudSchema } from "@/amc/schema.js";
 import { checkReadOnlyUser, testConnection } from "@/db/index.js";
 import type { AuditEventInput, AuditWriteResult } from "@/logger/audit.js";
 import {
@@ -12,6 +13,7 @@ import {
 } from "@/schema/index.js";
 import type {
 	ActiveDatabaseConnection,
+	AmazonMarketingCloudConnectionConfig,
 	DatabaseConnectionConfig,
 	DatabaseSchema,
 	DatabaseType,
@@ -35,6 +37,7 @@ export interface AddDatabaseConnectionInput {
 	readonly databaseUrl: string;
 	readonly prismaSchemaPath?: string;
 	readonly prismaDatasourceName?: string;
+	readonly amazonMarketingCloud?: AmazonMarketingCloudConnectionConfig;
 }
 
 export interface EditDatabaseConnectionInput {
@@ -44,6 +47,7 @@ export interface EditDatabaseConnectionInput {
 	readonly databaseUrl?: string;
 	readonly prismaSchemaPath?: string;
 	readonly prismaDatasourceName?: string;
+	readonly amazonMarketingCloud?: AmazonMarketingCloudConnectionConfig;
 }
 
 export interface RemoveDatabaseConnectionInput {
@@ -150,6 +154,10 @@ export class DatabaseConnectionManager {
 							input.databaseType === "prisma-postgres"
 								? input.prismaDatasourceName
 								: undefined,
+						amazonMarketingCloud:
+							input.databaseType === "amazon-marketing-cloud"
+								? input.amazonMarketingCloud
+								: undefined,
 					},
 					{ setActive: true },
 				);
@@ -175,6 +183,7 @@ export class DatabaseConnectionManager {
 					databaseUrl: input.databaseUrl,
 					prismaSchemaPath: input.prismaSchemaPath,
 					prismaDatasourceName: input.prismaDatasourceName,
+					amazonMarketingCloud: input.amazonMarketingCloud,
 				});
 
 				return this.buildPendingConnection(
@@ -260,6 +269,14 @@ export class DatabaseConnectionManager {
 			return { ok: false, operation, error: message };
 		}
 
+		if (pending.connection.databaseType === "amazon-marketing-cloud") {
+			return await this.saveVerifiedAmazonMarketingCloudConnection(
+				operation,
+				command,
+				pending,
+			);
+		}
+
 		let testResult: DatabaseConnectionTestResult;
 		try {
 			testResult = await this.dependencies.testConnection(
@@ -334,6 +351,90 @@ export class DatabaseConnectionManager {
 		};
 	}
 
+	private async saveVerifiedAmazonMarketingCloudConnection(
+		operation: "add" | "edit",
+		command: "connect" | "db edit",
+		pending: PendingDatabaseConnection,
+	): Promise<DatabaseConnectionManagerResult> {
+		let refreshedAccessToken: string | undefined;
+		let refreshedAccessTokenExpiresAt: string | undefined;
+
+		try {
+			const schema = await scanAmazonMarketingCloudSchema(pending.connection, {
+				onTokenRefresh: (accessToken, accessTokenExpiresAt) => {
+					refreshedAccessToken = accessToken;
+					refreshedAccessTokenExpiresAt = accessTokenExpiresAt;
+				},
+			});
+			const connections = pending.connections.map((connection) =>
+				connection.id === pending.connection.id &&
+				connection.amazonMarketingCloud
+					? {
+							...connection,
+							amazonMarketingCloud: {
+								...connection.amazonMarketingCloud,
+								accessToken:
+									refreshedAccessToken ??
+									connection.amazonMarketingCloud.accessToken,
+								accessTokenExpiresAt:
+									refreshedAccessTokenExpiresAt ??
+									connection.amazonMarketingCloud.accessTokenExpiresAt,
+							},
+						}
+					: connection,
+			);
+			const savedConfig = this.dependencies.saveConfig({
+				...pending.config,
+				databaseConnections: connections,
+				activeDatabaseId: pending.activeDatabaseId,
+			});
+			const connection = getActiveDatabaseConnection(
+				savedConfig,
+				pending.connection.name,
+			);
+			if (!connection) {
+				throw new DatabaseConnectionNotFoundError(pending.connection.name);
+			}
+
+			this.dependencies.saveSchemaForConnection(connection, schema);
+			await this.auditConnectionEvent(savedConfig, {
+				command,
+				name: connection.name,
+				connectionId: connection.id,
+				databaseType: connection.databaseType,
+				databaseName: schema.databaseName,
+				outcome: "success",
+				readOnly: true,
+			});
+
+			return {
+				ok: true,
+				operation,
+				config: savedConfig,
+				connection,
+				databaseVersion:
+					`Amazon Marketing Cloud ${connection.amazonMarketingCloud?.instanceId ?? ""}`.trim(),
+				readOnly: true,
+				schema: {
+					status: "updated",
+					databaseName: schema.databaseName,
+					tableCount: schema.tableCount,
+				},
+			};
+		} catch (err: unknown) {
+			const error = err instanceof Error ? err.message : String(err);
+			await this.auditConnectionEvent(pending.config, {
+				command,
+				name: pending.connection.name,
+				connectionId: pending.connection.id,
+				databaseType: pending.connection.databaseType,
+				outcome: "failure",
+				error,
+			});
+			return { ok: false, operation, error };
+		}
+	}
+
 	private buildPendingConnection(
 		config: QcpConfig,
 		snapshot: {
@@ -361,6 +462,7 @@ export class DatabaseConnectionManager {
 				databaseUrl: resolveDatabaseUrlForConnection(connection),
 				prismaSchemaPath: connection.prismaSchemaPath,
 				prismaDatasourceName: connection.prismaDatasourceName,
+				amazonMarketingCloud: connection.amazonMarketingCloud,
 			},
 		};
 	}

@@ -1,9 +1,11 @@
 import chalk from "chalk";
 import ora from "ora";
+import { scanAmazonMarketingCloudSchema } from "@/amc/schema.js";
 import {
 	getActiveDatabaseConnection,
 	LOCAL_SCHEMA_CATALOG_PATH,
 	loadConfig,
+	saveConfig,
 } from "@/config/index.js";
 import {
 	buildAuditResource,
@@ -53,7 +55,19 @@ export async function schemaScanCommand(
 	const spinner = ora(`Scanning schema for ${connection.name}...`).start();
 
 	try {
-		const schema = await scanSchema(connection.databaseUrl);
+		const schema =
+			connection.databaseType === "amazon-marketing-cloud"
+				? await scanAmazonMarketingCloudSchema(connection, {
+						onTokenRefresh: (accessToken, accessTokenExpiresAt) => {
+							persistAmazonMarketingCloudToken(
+								config,
+								connection.id,
+								accessToken,
+								accessTokenExpiresAt,
+							);
+						},
+					})
+				: await scanSchema(connection.databaseUrl);
 		spinner.succeed(
 			`Scanned ${schema.tableCount} tables from ${schema.databaseName}`,
 		);
@@ -144,6 +158,27 @@ export async function schemaScanCommand(
 		log("error", "Schema scan failed", { error: message });
 		process.exit(1);
 	}
+}
+
+function persistAmazonMarketingCloudToken(
+	config: ReturnType<typeof loadConfig>,
+	connectionId: string,
+	accessToken: string,
+	accessTokenExpiresAt: string,
+): void {
+	const databaseConnections = config.databaseConnections.map((connection) =>
+		connection.id === connectionId && connection.amazonMarketingCloud
+			? {
+					...connection,
+					amazonMarketingCloud: {
+						...connection.amazonMarketingCloud,
+						accessToken,
+						accessTokenExpiresAt,
+					},
+				}
+			: connection,
+	);
+	saveConfig({ ...config, databaseConnections });
 }
 
 export function schemaInfoCommand(options: SchemaInfoOptions = {}): void {

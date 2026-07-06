@@ -7,7 +7,23 @@ export type DatabaseType =
 	| "neon"
 	| "supabase"
 	| "oracle-postgres"
+	| "amazon-marketing-cloud"
 	| "other-postgres";
+
+export type AmazonMarketingCloudRegion = "NA" | "EU" | "FE";
+
+export interface AmazonMarketingCloudConnectionConfig {
+	region: AmazonMarketingCloudRegion;
+	apiBaseUrl: string;
+	instanceId: string;
+	clientId: string;
+	clientSecret: string;
+	refreshToken: string;
+	accessToken?: string;
+	accessTokenExpiresAt?: string;
+	advertiserId: string;
+	marketplaceId: string;
+}
 
 export interface DatabaseConnectionConfig {
 	id: string;
@@ -16,6 +32,7 @@ export interface DatabaseConnectionConfig {
 	databaseUrl: string;
 	prismaSchemaPath?: string;
 	prismaDatasourceName?: string;
+	amazonMarketingCloud?: AmazonMarketingCloudConnectionConfig;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -27,6 +44,7 @@ export interface ActiveDatabaseConnection {
 	databaseUrl: string;
 	prismaSchemaPath?: string;
 	prismaDatasourceName?: string;
+	amazonMarketingCloud?: AmazonMarketingCloudConnectionConfig;
 }
 
 export interface ApiKeys {

@@ -12,9 +12,11 @@ import inquirer from "inquirer";
 import ora from "ora";
 import { v7 as uuidv7 } from "uuid";
 import type { QcpSupervisorAgent } from "@/agents/supervisor-agent.js";
+import { scanAmazonMarketingCloudSchema } from "@/amc/schema.js";
 import {
 	getActiveDatabaseConnection,
 	loadConfig,
+	saveConfig,
 	withActiveDatabaseConnection,
 } from "@/config/index.js";
 import { log } from "@/logger/index.js";
@@ -39,7 +41,10 @@ import {
 	classifyPromptViolation,
 	sanitizeSensitiveData,
 } from "@/safety/index.js";
-import { loadSchemaForConnection } from "@/schema/index.js";
+import {
+	loadSchemaForConnection,
+	saveSchemaForConnection,
+} from "@/schema/index.js";
 import { semanticStoreExists } from "@/semantic/store.js";
 import {
 	initTelemetry,
@@ -58,7 +63,13 @@ import type {
 	DatabaseTransferDirection,
 	DatabaseTransferFormat,
 } from "@/transfer/types.js";
-import type { ApprovalReason, DatabaseSchema } from "@/types/index.js";
+import type {
+	ActiveDatabaseConnection,
+	ApprovalReason,
+	DatabaseSchema,
+} from "@/types/index.js";
+
+const AMAZON_MARKETING_CLOUD_SCHEMA_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const HELP_COMMANDS = new Set(["/help", "?", "help"]);
 const EXIT_COMMANDS = new Set([
@@ -107,6 +118,13 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 	let schema: DatabaseSchema;
 	try {
 		schema = loadSchemaForConnection(connection).schema;
+		if (shouldRefreshAmazonMarketingCloudSchema(connection, schema)) {
+			schemaSpinner.text = "Refreshing AMC data-source cache...";
+			schema = await refreshAmazonMarketingCloudSchema(
+				activeConfig,
+				connection,
+			);
+		}
 		schemaSpinner.succeed(
 			`Schema loaded · ${connection.name} · ${schema.databaseName} · ${schema.tableCount} tables`,
 		);
@@ -245,6 +263,41 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 
 	rl.close();
 	await shutdownTelemetry();
+}
+
+function shouldRefreshAmazonMarketingCloudSchema(
+	connection: ActiveDatabaseConnection,
+	schema: DatabaseSchema,
+): boolean {
+	if (connection.databaseType !== "amazon-marketing-cloud") return false;
+	const scannedAt = Date.parse(schema.scannedAt);
+	if (Number.isNaN(scannedAt)) return true;
+	return Date.now() - scannedAt > AMAZON_MARKETING_CLOUD_SCHEMA_MAX_AGE_MS;
+}
+
+async function refreshAmazonMarketingCloudSchema(
+	config: ReturnType<typeof loadConfig>,
+	connection: ActiveDatabaseConnection,
+): Promise<DatabaseSchema> {
+	const schema = await scanAmazonMarketingCloudSchema(connection, {
+		onTokenRefresh: (accessToken, accessTokenExpiresAt) => {
+			const databaseConnections = config.databaseConnections.map((candidate) =>
+				candidate.id === connection.id && candidate.amazonMarketingCloud
+					? {
+							...candidate,
+							amazonMarketingCloud: {
+								...candidate.amazonMarketingCloud,
+								accessToken,
+								accessTokenExpiresAt,
+							},
+						}
+					: candidate,
+			);
+			saveConfig({ ...config, databaseConnections });
+		},
+	});
+	saveSchemaForConnection(connection, schema);
+	return schema;
 }
 
 function getChatRuntimePackageGroups(

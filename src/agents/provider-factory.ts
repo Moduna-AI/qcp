@@ -13,6 +13,7 @@ import type {
 	DatabaseSchema,
 	QcpConfig,
 } from "@/types/index.js";
+import type { AmazonMarketingCloudAgent } from "./amazon-marketing-cloud-agent.js";
 import type { AbstractDatabaseAgent } from "./database-agent.js";
 import {
 	createDatabaseTools,
@@ -37,6 +38,7 @@ export interface CreateProviderDatabaseAgentOptions {
 }
 
 export type ProviderDatabaseAgent =
+	| AmazonMarketingCloudAgent<"qcp-amazon-marketing-cloud-agent">
 	| PostgresAgent<"qcp-postgres-agent">
 	| PrismaAgent<"qcp-prisma-agent">
 	| NeonAgent<"qcp-neon-agent">
@@ -49,19 +51,37 @@ export async function createProviderDatabaseAgent(
 	const model = createMastraModelConfig(options.config);
 	const semanticTools = await createProviderSemanticTools(options);
 	const tools = {
-		...createDatabaseTools({
-			databaseUrl: options.databaseUrl,
-			schema: options.schema,
-			sensitiveTablePatterns: options.config.sensitiveTablePatterns,
-			approvalHandler: options.approvalHandler,
-			auditContext: options.auditContext,
-			refreshSchemaAfterImport: createSchemaRefreshHandler(options),
-		}),
+		...(options.config.databaseType === "amazon-marketing-cloud"
+			? {}
+			: createDatabaseTools({
+					databaseUrl: options.databaseUrl,
+					schema: options.schema,
+					sensitiveTablePatterns: options.config.sensitiveTablePatterns,
+					approvalHandler: options.approvalHandler,
+					auditContext: options.auditContext,
+					refreshSchemaAfterImport: createSchemaRefreshHandler(options),
+				})),
 		...semanticTools,
 		...(options.tools ?? {}),
 	};
 
 	switch (options.config.databaseType) {
+		case "amazon-marketing-cloud": {
+			const { AmazonMarketingCloudAgent } = await import(
+				"./amazon-marketing-cloud-agent.js"
+			);
+			const connection = resolveProviderFactoryConnection(options);
+			return new AmazonMarketingCloudAgent({
+				id: "qcp-amazon-marketing-cloud-agent",
+				name: "QCP Amazon Marketing Cloud Agent",
+				description:
+					"Answers questions about Amazon Marketing Cloud using Presto SQL and qcp AMC Reporting API tools.",
+				model,
+				connection,
+				schema: options.schema,
+				tools,
+			});
+		}
 		case "prisma-postgres": {
 			const { PrismaAgent } = await import("./prisma-agent.js");
 			return new PrismaAgent({
@@ -200,10 +220,36 @@ function createSchemaRefreshHandler(
 	};
 }
 
+function resolveProviderFactoryConnection(
+	options: CreateProviderDatabaseAgentOptions,
+): ActiveDatabaseConnection {
+	const connection =
+		options.connectionId === undefined
+			? undefined
+			: options.config.databaseConnections.find(
+					(candidate) => candidate.id === options.connectionId,
+				);
+
+	return {
+		id: connection?.id ?? options.connectionId ?? "active",
+		name: connection?.name ?? "active",
+		databaseType: options.config.databaseType,
+		databaseUrl: options.databaseUrl,
+		prismaSchemaPath: options.config.prismaSchemaPath,
+		prismaDatasourceName: options.config.prismaDatasourceName,
+		amazonMarketingCloud: connection?.amazonMarketingCloud,
+	};
+}
+
 export function isProviderDatabaseAgent(
 	agent: AbstractDatabaseAgent,
 ): agent is ProviderDatabaseAgent {
-	return ["postgres", "prisma", "neon", "supabase", "oracle-postgres"].includes(
-		agent.getDatabaseType(),
-	);
+	return [
+		"postgres",
+		"prisma",
+		"neon",
+		"supabase",
+		"oracle-postgres",
+		"amazon-marketing-cloud",
+	].includes(agent.getDatabaseType());
 }

@@ -63,6 +63,43 @@ describe("provider database agent factory", () => {
 
 		expect(agent.getTools()).toHaveProperty("qcp_read_oracle_postgres_context");
 	});
+
+	test("routes Amazon Marketing Cloud to the AMC agent without Postgres tools", async () => {
+		const config = configWithDatabaseType("amazon-marketing-cloud");
+		config.databaseConnections = [
+			{
+				id: "amc",
+				name: "amc",
+				databaseType: "amazon-marketing-cloud",
+				databaseUrl: "https://advertising-api.amazon.com",
+				amazonMarketingCloud: {
+					region: "NA",
+					apiBaseUrl: "https://advertising-api.amazon.com",
+					instanceId: "amc-instance",
+					clientId: "client-id",
+					clientSecret: "client-secret",
+					refreshToken: "refresh-token",
+					advertiserId: "advertiser-id",
+					marketplaceId: "ATVPDKIKX0DER",
+				},
+				createdAt: "2026-07-06T00:00:00.000Z",
+				updatedAt: "2026-07-06T00:00:00.000Z",
+			},
+		];
+		config.activeDatabaseId = "amc";
+
+		const agent = await createProviderDatabaseAgent({
+			config,
+			connectionId: "amc",
+			databaseUrl: "https://advertising-api.amazon.com",
+			schema,
+		});
+
+		expect(agent.getDatabaseType()).toBe("amazon-marketing-cloud");
+		expect(agent.getTools()).toHaveProperty("qcp_read_amc_context");
+		expect(agent.getTools()).toHaveProperty("qcp_validate_amc_sql");
+		expect(agent.getTools()).not.toHaveProperty("qcp_execute_read_query");
+	});
 });
 
 function configWithDatabaseType(

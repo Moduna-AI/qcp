@@ -1,20 +1,29 @@
 import inquirer from "inquirer";
 import ora from "ora";
 import type { QcpSupervisorAgent } from "@/agents/supervisor-agent.js";
+import { AmazonMarketingCloudQueryService } from "@/amc/query-service.js";
+import { scanAmazonMarketingCloudSchema } from "@/amc/schema.js";
 import {
 	ensureConfigDir,
 	getActiveDatabaseConnection,
 	loadConfig,
+	saveConfig,
 	withActiveDatabaseConnection,
 } from "@/config/index.js";
+import { createProvider } from "@/llm/index.js";
 import { log } from "@/logger/index.js";
 import {
 	printApprovalWarning,
 	printError,
+	printExplanation,
 	printInfo,
 	printMetrics,
 	printPromptViolation,
 	printQuestion,
+	printResults,
+	printSection,
+	printSql,
+	printSuccess,
 	printSummary,
 } from "@/output/index.js";
 import {
@@ -27,7 +36,11 @@ import {
 	type PackageGroupsAudit,
 } from "@/packages/runtime.js";
 import { classifyPromptViolation } from "@/safety/index.js";
-import { loadSchemaForConnection, schemaToContext } from "@/schema/index.js";
+import {
+	loadSchemaForConnection,
+	saveSchemaForConnection,
+	schemaToContext,
+} from "@/schema/index.js";
 import { semanticStoreExists } from "@/semantic/store.js";
 import {
 	initTelemetry,
@@ -47,6 +60,7 @@ import type {
 	DatabaseTransferFormat,
 } from "@/transfer/types.js";
 import type {
+	ActiveDatabaseConnection,
 	ApprovalReason,
 	DatabaseSchema,
 	QueryMetrics,
@@ -58,7 +72,15 @@ export interface AskOptions {
 	debug?: boolean;
 	safeMode?: boolean;
 	noConfirm?: boolean;
+	exportPath?: string;
+	dryRun?: boolean;
+	since?: string;
+	until?: string;
+	timeZone?: string;
+	limit?: number;
 }
+
+const AMAZON_MARKETING_CLOUD_SCHEMA_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export async function askCommand(
 	question: string,
@@ -85,6 +107,13 @@ export async function askCommand(
 
 	try {
 		schema = loadSchemaForConnection(connection).schema;
+		if (shouldRefreshAmazonMarketingCloudSchema(connection, schema)) {
+			schemaSpinner.text = "Refreshing AMC data-source cache...";
+			schema = await refreshAmazonMarketingCloudSchema(
+				activeConfig,
+				connection,
+			);
+		}
 		schemaSpinner.succeed(
 			`Schema loaded (${connection.name} · ${schema.tableCount} tables)`,
 		);
@@ -97,6 +126,19 @@ export async function askCommand(
 		printError(message);
 		await shutdownTelemetry();
 		process.exit(1);
+	}
+
+	if (connection.databaseType === "amazon-marketing-cloud") {
+		await handleAmazonMarketingCloudAsk({
+			question: questionForAgent,
+			config,
+			activeConfig,
+			connection,
+			schema,
+			options,
+		});
+		await shutdownTelemetry();
+		return;
 	}
 
 	// ── Create supervisor agent ───────────────────────────────────────────────────
@@ -205,6 +247,199 @@ export async function askCommand(
 	}
 
 	await shutdownTelemetry();
+}
+
+async function handleAmazonMarketingCloudAsk(input: {
+	readonly question: string;
+	readonly config: ReturnType<typeof loadConfig>;
+	readonly activeConfig: ReturnType<typeof loadConfig>;
+	readonly connection: ActiveDatabaseConnection;
+	readonly schema: DatabaseSchema;
+	readonly options: AskOptions;
+}): Promise<void> {
+	printQuestion(input.question);
+
+	const promptViolation = classifyPromptViolation(input.question);
+	if (promptViolation) {
+		printPromptViolation(promptViolation);
+		trackQueryRejected(`${promptViolation.category}_prompt_violation`);
+		process.exit(1);
+	}
+
+	const packageAudit = auditAskRuntimePackages(input.activeConfig);
+	if (packageAudit.missingGroups.length > 0) {
+		await ensurePackageGroups({
+			commandName: "qcp ask",
+			groups: packageAudit.missingGroups,
+			verbose: input.options.verbose || input.options.debug,
+		});
+	}
+
+	const provider = await createProvider(input.activeConfig);
+	const service = new AmazonMarketingCloudQueryService({
+		config: input.activeConfig,
+		connection: input.connection,
+		schema: input.schema,
+		provider,
+	});
+
+	let interrupted = false;
+	let lastWorkflowExecutionId: string | undefined;
+	const spinner = ora(
+		input.options.dryRun
+			? "Generating and dry-running AMC SQL..."
+			: "Generating AMC SQL...",
+	).start();
+	const onInterrupt = (): void => {
+		interrupted = true;
+	};
+	process.once("SIGINT", onInterrupt);
+
+	try {
+		const result = await service.runQuestion(input.question, {
+			dryRun: input.options.dryRun,
+			exportPath: input.options.exportPath,
+			since: input.options.since,
+			until: input.options.until,
+			timeZone: input.options.timeZone,
+			limit: input.options.limit ?? 50,
+			onPoll: (execution) => {
+				lastWorkflowExecutionId = execution.workflowExecutionId;
+				spinner.text = `AMC execution ${execution.workflowExecutionId}: ${execution.status}`;
+			},
+			shouldStopPolling: () => interrupted,
+		});
+
+		if (result.stoppedPolling) {
+			spinner.warn(
+				"Stopped local AMC polling; remote execution is still running.",
+			);
+			printAmazonMarketingCloudResultMetadata(result);
+			const workflowExecutionId =
+				result.execution?.workflowExecutionId ?? lastWorkflowExecutionId;
+			if (workflowExecutionId) {
+				printInfo(`Check status later: qcp amc status ${workflowExecutionId}`);
+			}
+			return;
+		}
+
+		if (
+			result.execution &&
+			result.execution.status !== "SUCCEEDED" &&
+			!input.options.dryRun
+		) {
+			spinner.fail(`AMC execution ${result.execution.status}`);
+			printAmazonMarketingCloudResultMetadata(result);
+			if (result.execution.errorReason) {
+				printError(result.execution.errorReason);
+			}
+			process.exit(1);
+		}
+
+		spinner.succeed(
+			input.options.dryRun
+				? "AMC dry-run completed"
+				: "AMC execution completed",
+		);
+		printAmazonMarketingCloudResultMetadata(result);
+		if (result.queryResult) {
+			printResults(result.queryResult);
+		}
+		if (result.exportedFiles.length > 0) {
+			printSuccess(`Exported ${result.exportedFiles.length} AMC file(s)`);
+			for (const file of result.exportedFiles) {
+				printInfo(file);
+			}
+		}
+
+		trackQuery({
+			provider: input.config.provider,
+			model: input.config.model,
+			latencyMs:
+				result.sqlGeneration.latencyMs +
+				(result.queryResult?.executionTimeMs ?? 0),
+		});
+
+		if (
+			input.options.metrics ||
+			input.options.verbose ||
+			input.config.showMetrics
+		) {
+			const metrics: QueryMetrics = {
+				tokensIn: result.sqlGeneration.tokensIn ?? 0,
+				tokensOut: result.sqlGeneration.tokensOut ?? 0,
+				totalLatencyMs:
+					result.sqlGeneration.latencyMs +
+					(result.queryResult?.executionTimeMs ?? 0),
+				sqlGenerationMs: result.sqlGeneration.latencyMs,
+				executionMs: result.queryResult?.executionTimeMs ?? 0,
+				summaryMs: 0,
+				provider: input.config.provider,
+				model: input.config.model,
+			};
+			printMetrics(metrics);
+		}
+	} catch (err: unknown) {
+		spinner.fail("AMC ask failed");
+		const message = err instanceof Error ? err.message : String(err);
+		printError(message);
+		trackError("ask", "amc_ask_failed");
+		process.exit(1);
+	} finally {
+		process.removeListener("SIGINT", onInterrupt);
+	}
+}
+
+function printAmazonMarketingCloudResultMetadata(
+	result: Awaited<ReturnType<AmazonMarketingCloudQueryService["runQuestion"]>>,
+): void {
+	printSql(result.sql);
+	printExplanation(result.explanation);
+	printSection("AMC Execution");
+	console.log(`  Dry-run:     ${result.dryRunExecution.status}`);
+	if (result.execution) {
+		console.log(`  Execution:   ${result.execution.workflowExecutionId}`);
+		console.log(`  Status:      ${result.execution.status}`);
+	}
+	console.log(
+		`  Window:      ${result.timeWindow.start} to ${result.timeWindow.end}`,
+	);
+	console.log(`  Timezone:    ${result.timeWindow.timeZone}`);
+}
+
+function shouldRefreshAmazonMarketingCloudSchema(
+	connection: ActiveDatabaseConnection,
+	schema: DatabaseSchema,
+): boolean {
+	if (connection.databaseType !== "amazon-marketing-cloud") return false;
+	const scannedAt = Date.parse(schema.scannedAt);
+	if (Number.isNaN(scannedAt)) return true;
+	return Date.now() - scannedAt > AMAZON_MARKETING_CLOUD_SCHEMA_MAX_AGE_MS;
+}
+
+async function refreshAmazonMarketingCloudSchema(
+	config: ReturnType<typeof loadConfig>,
+	connection: ActiveDatabaseConnection,
+): Promise<DatabaseSchema> {
+	const schema = await scanAmazonMarketingCloudSchema(connection, {
+		onTokenRefresh: (accessToken, accessTokenExpiresAt) => {
+			const databaseConnections = config.databaseConnections.map((candidate) =>
+				candidate.id === connection.id && candidate.amazonMarketingCloud
+					? {
+							...candidate,
+							amazonMarketingCloud: {
+								...candidate.amazonMarketingCloud,
+								accessToken,
+								accessTokenExpiresAt,
+							},
+						}
+					: candidate,
+			);
+			saveConfig({ ...config, databaseConnections });
+		},
+	});
+	saveSchemaForConnection(connection, schema);
+	return schema;
 }
 
 function getAskRuntimePackageGroups(
