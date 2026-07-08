@@ -92,6 +92,36 @@ pnpm add -g qcp
 bun add -g qcp
 ```
 
+### Optional local web assistant
+
+`qcp-web` is a separate opt-in localhost app. It is not installed by the
+standard `qcp` CLI installers.
+
+From this repository:
+
+```bash
+bun install
+bun run build
+cd apps/qcp-web
+bun run dev
+```
+
+Or run the app launcher with Bun:
+
+```bash
+cd apps/qcp-web
+bun run ./bin/qcp-web.ts
+```
+
+On first launch, open the localhost app and choose a local qcp-web passcode.
+qcp stores only a hash in `~/.qcp/config.json`. It reads the same `qcp connect`
+aliases, model provider, API keys, and schema catalog as the CLI. If a selected
+database has no schema, run:
+
+```bash
+qcp schema scan
+```
+
 ---
 
 ## Quick Start

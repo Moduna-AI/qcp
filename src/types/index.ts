@@ -35,6 +35,14 @@ export interface ApiKeys {
 	anthropic?: string;
 }
 
+export interface QcpWebAuthConfig {
+	passcodeHash: string;
+	passcodeSalt: string;
+	sessionTokenHash?: string;
+	createdAt: string;
+	updatedAt: string;
+}
+
 export interface QcpConfig {
 	version: string;
 	installId: string;
@@ -53,6 +61,7 @@ export interface QcpConfig {
 	sensitiveTablePatterns: string[];
 	ollamaHost?: string;
 	apiKeys: ApiKeys;
+	webAuth?: QcpWebAuthConfig;
 }
 
 // ─── Database Schema ──────────────────────────────────────────────────────────

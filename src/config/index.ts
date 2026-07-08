@@ -33,6 +33,14 @@ const ApiKeysSchema = z.object({
 	anthropic: z.string().optional(),
 });
 
+const WebAuthSchema = z.object({
+	passcodeHash: z.string().min(1),
+	passcodeSalt: z.string().min(1),
+	sessionTokenHash: z.string().optional(),
+	createdAt: z.string(),
+	updatedAt: z.string(),
+});
+
 export const DATABASE_TYPES = [
 	"prisma-postgres",
 	"neon",
@@ -87,6 +95,7 @@ const QcpConfigSchema = z.object({
 		]),
 	ollamaHost: z.string().optional(),
 	apiKeys: ApiKeysSchema.default({}),
+	webAuth: WebAuthSchema.optional(),
 });
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────

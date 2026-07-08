@@ -37,6 +37,15 @@ export interface ChatAgentResponse {
 	readonly direct: boolean;
 }
 
+export interface ChatAgentStreamResponse {
+	readonly direct: false;
+	readonly stream: Awaited<ReturnType<Agent<"qcp-supervisor-agent">["stream"]>>;
+}
+
+export type ChatAgentRunResponse =
+	| ({ readonly direct: true } & ChatAgentResponse)
+	| ChatAgentStreamResponse;
+
 export class QcpSupervisorAgentConfigurationError extends Error {
 	public constructor(message: string) {
 		super(message);
@@ -143,6 +152,42 @@ export class QcpSupervisorAgent {
 			tokensOut: response.usage?.outputTokens,
 			latencyMs: Date.now() - start,
 			direct: false,
+		};
+	}
+
+	public async streamResponse(
+		question: string,
+	): Promise<ChatAgentRunResponse> {
+		const start = Date.now();
+		const promptViolation = classifyPromptViolation(question);
+		if (promptViolation) {
+			throw new PromptViolationError(promptViolation);
+		}
+
+		const directAnswer = getDirectChatAnswer(
+			question,
+			this.schema,
+			this.connectionName,
+		);
+		if (directAnswer) {
+			return {
+				text: directAnswer,
+				latencyMs: Date.now() - start,
+				direct: true,
+			};
+		}
+
+		const stream = await this.agent.stream(buildSupervisorPrompt(question), {
+			maxSteps: 8,
+			modelSettings: {
+				temperature: 0.2,
+			},
+			delegation: this.buildDelegationConfig(),
+		});
+
+		return {
+			direct: false,
+			stream,
 		};
 	}
 

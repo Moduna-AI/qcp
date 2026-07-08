@@ -7,6 +7,7 @@ import {
 	getPackageStoreDir,
 	installPackageGroup,
 	type PackageGroup,
+	type PackageCommandRunner,
 	type PackageGroupStatus,
 	providerPackageGroup,
 } from "./lazy-packages.js";
@@ -23,6 +24,14 @@ export interface EnsurePackageGroupsOptions {
 	readonly verbose?: boolean;
 	readonly interactive?: boolean;
 	readonly targetDir?: string;
+}
+
+export interface InstallMissingPackageGroupsOptions {
+	readonly commandName: string;
+	readonly groups: readonly PackageGroup[];
+	readonly verbose?: boolean;
+	readonly targetDir?: string;
+	readonly runner?: PackageCommandRunner;
 }
 
 export async function ensurePackageGroups(
@@ -90,6 +99,39 @@ export async function ensurePackageGroups(
 			);
 		}
 		spinner.succeed(`Installed ${group} packages`);
+	}
+}
+
+export async function installMissingPackageGroups(
+	options: InstallMissingPackageGroupsOptions,
+): Promise<void> {
+	const { missingGroups } = auditPackageGroups(options.groups, options.targetDir);
+	if (missingGroups.length === 0) return;
+
+	for (const group of missingGroups) {
+		const status = getPackageGroupStatus(group, options.targetDir);
+		if (status.packages.length === 0) continue;
+
+		const targetDir = options.targetDir ?? getPackageStoreDir();
+		const result = await installPackageGroup({
+			group,
+			verbose: options.verbose,
+			targetDir: options.targetDir,
+			runner: options.runner,
+		});
+		if (!result.ok) {
+			throw new Error(
+				[
+					`Failed to install qcp runtime packages for ${options.commandName}.`,
+					`Package group: ${group}`,
+					`Target directory: ${targetDir}`,
+					`Install with: ${formatInstallCommand(group)}`,
+					result.stderr.trim() || result.stdout.trim(),
+				]
+					.filter((line) => line.length > 0)
+					.join("\n"),
+			);
+		}
 	}
 }
 

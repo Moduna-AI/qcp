@@ -1,0 +1,32 @@
+{
+	"name": "qcp-web",
+	"version": "0.1.0",
+	"description": "Local web assistant for qcp",
+	"type": "module",
+	"bin": {
+		"qcp-web": "./bin/qcp-web.ts"
+	},
+	"scripts": {
+		"dev": "next dev -H 127.0.0.1",
+		"build": "next build",
+		"start": "next start -H 127.0.0.1",
+		"type-check": "tsc --noEmit",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"@ai-sdk/react": "4.0.18",
+		"@mastra/ai-sdk": "1.6.1",
+		"@moduna/qcp": "file:../..",
+		"ai": "7.0.17",
+		"next": "16.2.10",
+		"react": "19.2.7",
+		"react-dom": "19.2.7",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"@types/node": "^26.1.0",
+		"@types/react": "^19.2.7",
+		"@types/react-dom": "^19.2.3",
+		"typescript": "^6.0.3"
+	}
+}

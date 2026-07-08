@@ -393,8 +393,14 @@ function isPackageInstalled(packageName: string, targetDir: string): boolean {
 		resolveAvailablePackage(packageName, targetDir);
 		return true;
 	} catch {
-		return false;
+		return packageManifestExists(packageName, targetDir);
 	}
+}
+
+function packageManifestExists(packageName: string, targetDir: string): boolean {
+	return existsSync(
+		join(targetDir, "node_modules", ...packageName.split("/"), "package.json"),
+	);
 }
 
 function packageGroupNames(): PackageGroup[] {
