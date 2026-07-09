@@ -1,4 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import type { DatabaseToolApprovalHandler } from "./agents/database-tools.js";
+import type { QcpSupervisorAgent } from "./agents/supervisor-agent.js";
 import {
 	getActiveDatabaseConnection,
 	loadConfig,
@@ -8,24 +10,26 @@ import {
 import {
 	formatInstallCommand,
 	getPackageStoreDir,
-	providerPackageGroup,
 	type PackageGroup,
 	type PackageGroupStatus,
+	providerPackageGroup,
 } from "./packages/lazy-packages.js";
 import {
 	auditPackageGroups,
 	installMissingPackageGroups,
 } from "./packages/runtime.js";
-import { loadSchemaForConnection, schemaCatalogHasConnection } from "./schema/index.js";
+import {
+	loadSchemaForConnection,
+	schemaCatalogHasConnection,
+} from "./schema/index.js";
 import { semanticStoreExists } from "./semantic/store.js";
 import type {
 	ActiveDatabaseConnection,
 	DatabaseSchema,
 	QcpConfig,
 	QcpWebAuthConfig,
+	SafetyLevel,
 } from "./types/index.js";
-import type { DatabaseToolApprovalHandler } from "./agents/database-tools.js";
-import type { QcpSupervisorAgent } from "./agents/supervisor-agent.js";
 
 export type { QcpSupervisorAgent } from "./agents/supervisor-agent.js";
 
@@ -44,6 +48,10 @@ export interface QcpWebConnectionSummary {
 	readonly schemaAvailable: boolean;
 	readonly databaseName?: string;
 	readonly tableCount?: number;
+}
+
+export interface QcpWebSafetyConfig {
+	readonly safetyLevel: SafetyLevel;
 }
 
 export interface QcpWebResolvedConnection {
@@ -97,11 +105,15 @@ export function ensureQcpWebAuthSetup(): QcpWebAuthSetup {
 	};
 }
 
-export function isQcpWebAuthConfigured(config: QcpConfig = loadConfig()): boolean {
+export function isQcpWebAuthConfigured(
+	config: QcpConfig = loadConfig(),
+): boolean {
 	return Boolean(config.webAuth);
 }
 
-export function initializeQcpWebAuth(passcode: string): { readonly created: boolean } {
+export function initializeQcpWebAuth(passcode: string): {
+	readonly created: boolean;
+} {
 	const trimmedPasscode = passcode.trim();
 	if (!/^\d{4}$/.test(trimmedPasscode)) {
 		throw new QcpWebAuthError("qcp-web passcode must be exactly 4 digits.");
@@ -128,7 +140,13 @@ export function loginQcpWeb(passcode: string): {
 	if (!webAuth) {
 		throw new QcpWebAuthError("qcp-web auth is not initialized.");
 	}
-	if (!verifySecret(normalizedPasscode, webAuth.passcodeSalt, webAuth.passcodeHash)) {
+	if (
+		!verifySecret(
+			normalizedPasscode,
+			webAuth.passcodeSalt,
+			webAuth.passcodeHash,
+		)
+	) {
 		throw new QcpWebAuthError("Invalid qcp-web passcode.");
 	}
 
@@ -200,6 +218,26 @@ export function listQcpWebConnections(
 		.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+export function getQcpWebSafetyConfig(
+	config: QcpConfig = loadConfig(),
+): QcpWebSafetyConfig {
+	return {
+		safetyLevel: config.safetyLevel,
+	};
+}
+
+export function updateQcpWebSafetyLevel(
+	safetyLevel: SafetyLevel,
+): QcpWebSafetyConfig {
+	const config = loadConfig();
+	const updated = saveConfig({
+		...config,
+		safetyLevel,
+		safeMode: safetyLevel !== "low",
+	});
+	return getQcpWebSafetyConfig(updated);
+}
+
 export function resolveQcpWebConnection(
 	connectionName?: string,
 	config: QcpConfig = loadConfig(),
@@ -216,9 +254,7 @@ export function resolveQcpWebConnection(
 		schema = loadSchemaForConnection(connection).schema;
 	} catch (error: unknown) {
 		const message = error instanceof Error ? error.message : String(error);
-		throw new QcpWebConfigurationError(
-			`${message}\nRun: qcp schema scan`,
-		);
+		throw new QcpWebConfigurationError(`${message}\nRun: qcp schema scan`);
 	}
 
 	return {
@@ -231,22 +267,24 @@ export function resolveQcpWebConnection(
 export async function createQcpWebSupervisor(options: {
 	readonly connectionName?: string;
 	readonly sessionId: string;
+	readonly safetyLevel?: SafetyLevel;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
 }): Promise<QcpWebSupervisorSession> {
 	const resolved = resolveQcpWebConnection(options.connectionName);
+	const config = {
+		...resolved.config,
+		safetyLevel: options.safetyLevel ?? resolved.config.safetyLevel,
+	};
 	await installMissingPackageGroups({
 		commandName: "qcp-web",
 		groups: getQcpWebRuntimePackageGroups(
-			resolved.config,
-			resolved.config.databaseType,
+			config,
+			config.databaseType,
 			semanticStoreExists(),
 		),
 	});
 
-	const audit = auditQcpWebRuntimePackages(
-		resolved.config,
-		resolved.config.databaseType,
-	);
+	const audit = auditQcpWebRuntimePackages(config, config.databaseType);
 	if (audit.missingGroups.length > 0) {
 		throw new QcpWebRuntimeDependencyError({
 			missingGroups: audit.missingGroups,
@@ -257,7 +295,7 @@ export async function createQcpWebSupervisor(options: {
 
 	const { QcpSupervisorAgent } = await import("./agents/supervisor-agent.js");
 	const supervisor = await QcpSupervisorAgent.create({
-		config: resolved.config,
+		config,
 		command: "web",
 		sessionId: options.sessionId,
 		connectionId: resolved.connection.id,
@@ -270,6 +308,7 @@ export async function createQcpWebSupervisor(options: {
 
 	return {
 		...resolved,
+		config,
 		supervisor,
 	};
 }
@@ -327,7 +366,11 @@ function hashSecret(secret: string, salt: string): string {
 	return createHash("sha256").update(`${salt}:${secret}`).digest("hex");
 }
 
-function verifySecret(secret: string, salt: string, expectedHash: string): boolean {
+function verifySecret(
+	secret: string,
+	salt: string,
+	expectedHash: string,
+): boolean {
 	const actual = Buffer.from(hashSecret(secret, salt), "utf8");
 	const expected = Buffer.from(expectedHash, "utf8");
 	if (actual.length !== expected.length) return false;

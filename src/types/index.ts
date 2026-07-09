@@ -55,6 +55,7 @@ export interface QcpConfig {
 	provider: ProviderName;
 	model: string;
 	telemetry: boolean;
+	safetyLevel: SafetyLevel;
 	safeMode: boolean;
 	showSql: boolean;
 	showMetrics: boolean;
@@ -121,6 +122,8 @@ export interface SchemaCatalog {
 }
 
 // ─── Safety ───────────────────────────────────────────────────────────────────
+
+export type SafetyLevel = "low" | "standard" | "strict";
 
 export interface SafetyReport {
 	safe: boolean;
@@ -261,6 +264,11 @@ export interface TelemetryEvent {
 // ─── Approval ─────────────────────────────────────────────────────────────────
 
 export interface ApprovalReason {
-	type: "sensitive_table" | "large_scan" | "no_limit" | "high_cost";
+	type:
+		| "sensitive_table"
+		| "large_scan"
+		| "no_limit"
+		| "high_cost"
+		| "strict_mode";
 	detail: string;
 }

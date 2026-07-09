@@ -397,7 +397,10 @@ function isPackageInstalled(packageName: string, targetDir: string): boolean {
 	}
 }
 
-function packageManifestExists(packageName: string, targetDir: string): boolean {
+function packageManifestExists(
+	packageName: string,
+	targetDir: string,
+): boolean {
 	return existsSync(
 		join(targetDir, "node_modules", ...packageName.split("/"), "package.json"),
 	);

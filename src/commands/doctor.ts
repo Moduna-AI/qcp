@@ -232,12 +232,13 @@ function checkConfiguration(
 			value: config.telemetry ? "enabled" : "disabled",
 		},
 		{
-			name: "Safe mode",
-			status: config.safeMode ? "healthy" : "warning",
-			value: config.safeMode ? "enabled" : "disabled",
-			message: config.safeMode
-				? undefined
-				: "Safe mode is off — no approval prompts",
+			name: "Safety level",
+			status: config.safetyLevel === "low" ? "warning" : "healthy",
+			value: config.safetyLevel,
+			message:
+				config.safetyLevel === "low"
+					? "Low safety skips routine read approval prompts"
+					: undefined,
 		},
 		{
 			name: "Show SQL",
@@ -329,6 +330,7 @@ export async function doctorCommand(
 			},
 			settings: {
 				telemetry: config.telemetry,
+				safetyLevel: config.safetyLevel,
 				safeMode: config.safeMode,
 				showSql: config.showSql,
 				showMetrics: config.showMetrics,

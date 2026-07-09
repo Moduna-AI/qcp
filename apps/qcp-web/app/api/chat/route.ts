@@ -4,18 +4,20 @@ import { chatRequestSchema } from "~/lib/api";
 import { requireAuthenticated } from "~/lib/auth";
 import {
 	createApprovalHandler,
+	type PendingRun,
 	pendingRuns,
 	streamDirectText,
 	streamError,
 	streamMastraOutput,
-	type PendingRun,
 } from "~/lib/chat-runs";
 
 export async function POST(request: Request): Promise<Response> {
 	const unauthorized = await requireAuthenticated();
 	if (unauthorized) return unauthorized;
 
-	const parsed = chatRequestSchema.safeParse(await request.json().catch(() => ({})));
+	const parsed = chatRequestSchema.safeParse(
+		await request.json().catch(() => ({})),
+	);
 	if (!parsed.success) {
 		return Response.json({ error: "Message is required." }, { status: 400 });
 	}
@@ -25,13 +27,16 @@ export async function POST(request: Request): Promise<Response> {
 		const session = await createQcpWebSupervisor({
 			connectionName: parsed.data.connectionName,
 			sessionId: randomUUID(),
+			safetyLevel: parsed.data.safetyLevel,
 			approvalHandler: createApprovalHandler(approvedToolCallIds),
 		});
 		const pending: PendingRun = {
 			supervisor: session.supervisor,
 			approvedToolCallIds,
 		};
-		const response = await session.supervisor.streamResponse(parsed.data.message);
+		const response = await session.supervisor.streamResponse(
+			parsed.data.message,
+		);
 		if (response.direct) {
 			return streamDirectText(response.text);
 		}

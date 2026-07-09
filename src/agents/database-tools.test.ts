@@ -156,6 +156,29 @@ describe("shared database agent tools", () => {
 		);
 	});
 
+	test("low safety skips sensitive read approval but keeps validation", async () => {
+		let executed = false;
+		const tools = createDatabaseTools({
+			databaseUrl: "postgres://example",
+			schema,
+			safetyLevel: "low",
+			sensitiveTablePatterns: ["projects"],
+			approvalHandler: async () => false,
+			queryExecutor: async () => {
+				executed = true;
+				return emptyResult();
+			},
+		});
+
+		const result = await executeTool(tools, "qcp_execute_read_sql", {
+			sql: "SELECT * FROM projects",
+		});
+		const output = result as { ok: boolean };
+
+		expect(output.ok).toBe(true);
+		expect(executed).toBe(true);
+	});
+
 	test("suggests query improvements from a safe explain plan", async () => {
 		const tools = createDatabaseTools({
 			databaseUrl: "postgres://example",
@@ -292,6 +315,30 @@ describe("shared database agent tools", () => {
 		expect(output.rowCount).toBe(1);
 		expect(output.filePath).toBe(join(dir, "projects.json"));
 		expect(readFileSync(join(dir, "projects.json"), "utf-8")).toContain("Ada");
+	});
+
+	test("strict safety requires approval before export", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "qcp-transfer-tool-"));
+		const tools = createDatabaseTools({
+			databaseUrl: "postgres://example",
+			schema,
+			safetyLevel: "strict",
+			transferService: new DatabaseTransferService({
+				databaseUrl: "postgres://example",
+				schema,
+				cwd: dir,
+				queryExecutor: async () => emptyResult(),
+			}),
+		});
+
+		const result = await executeTool(tools, "qcp_export_database_data", {
+			filePath: "projects.json",
+			table: { table: "projects" },
+		});
+		const output = result as { ok: boolean; error?: string };
+
+		expect(output.ok).toBe(false);
+		expect(output.error).toMatch(/approval/i);
 	});
 
 	test("requires approval before import creates a table", async () => {

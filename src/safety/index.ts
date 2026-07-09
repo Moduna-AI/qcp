@@ -31,6 +31,8 @@ import type {
 	TenantIsolationReport,
 } from "../types/index.js";
 
+export * from "./policy.js";
+
 // ─── Statement allowlist ──────────────────────────────────────────────────────
 
 const ALLOWED_STATEMENT_TYPES = new Set(["select", "with"]);

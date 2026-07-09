@@ -6,13 +6,17 @@ interface LoginFormProps {
 	readonly setupRequired: boolean;
 }
 
-export function LoginForm({ setupRequired }: LoginFormProps): React.ReactElement {
+export function LoginForm({
+	setupRequired,
+}: LoginFormProps): React.ReactElement {
 	const [passcode, setPasscode] = useState("");
 	const [confirmPasscode, setConfirmPasscode] = useState("");
 	const [error, setError] = useState<string | undefined>();
 	const [loading, setLoading] = useState(false);
 
-	async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+	async function submit(
+		event: React.FormEvent<HTMLFormElement>,
+	): Promise<void> {
 		event.preventDefault();
 		const normalizedPasscode = passcode.trim();
 		const normalizedConfirmPasscode = confirmPasscode.trim();
@@ -66,7 +70,11 @@ export function LoginForm({ setupRequired }: LoginFormProps): React.ReactElement
 						className="input"
 						inputMode={setupRequired ? "numeric" : undefined}
 						maxLength={setupRequired ? 4 : undefined}
-						onChange={(event) => setPasscode(normalizePasscodeInput(event.target.value, setupRequired))}
+						onChange={(event) =>
+							setPasscode(
+								normalizePasscodeInput(event.target.value, setupRequired),
+							)
+						}
 						placeholder={setupRequired ? "Create passcode" : "Local passcode"}
 						type="password"
 						value={passcode}
@@ -79,7 +87,11 @@ export function LoginForm({ setupRequired }: LoginFormProps): React.ReactElement
 								className="input"
 								inputMode="numeric"
 								maxLength={4}
-								onChange={(event) => setConfirmPasscode(normalizePasscodeInput(event.target.value, true))}
+								onChange={(event) =>
+									setConfirmPasscode(
+										normalizePasscodeInput(event.target.value, true),
+									)
+								}
 								placeholder="Confirm passcode"
 								type="password"
 								value={confirmPasscode}
@@ -100,8 +112,12 @@ export function LoginForm({ setupRequired }: LoginFormProps): React.ReactElement
 						type="submit"
 					>
 						{loading
-							? setupRequired ? "Creating..." : "Checking..."
-							: setupRequired ? "Create passcode" : "Open assistant"}
+							? setupRequired
+								? "Creating..."
+								: "Checking..."
+							: setupRequired
+								? "Create passcode"
+								: "Open assistant"}
 					</button>
 				</form>
 				{error ? <p className="error">{error}</p> : null}

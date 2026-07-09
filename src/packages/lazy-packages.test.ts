@@ -92,7 +92,10 @@ function writeNestedExportPackage(store: string, packageName: string): void {
 	);
 }
 
-function writeSubpathOnlyExportPackage(store: string, packageName: string): void {
+function writeSubpathOnlyExportPackage(
+	store: string,
+	packageName: string,
+): void {
 	const packageDir = join(store, "node_modules", ...packageName.split("/"));
 	mkdirSync(join(packageDir, "lib-esm"), { recursive: true });
 	mkdirSync(join(packageDir, "lib-cjs"), { recursive: true });
@@ -110,8 +113,14 @@ function writeSubpathOnlyExportPackage(store: string, packageName: string): void
 			},
 		}),
 	);
-	writeFileSync(join(packageDir, "lib-esm", "config.js"), "export default {};\n");
-	writeFileSync(join(packageDir, "lib-cjs", "config.js"), "module.exports = {};\n");
+	writeFileSync(
+		join(packageDir, "lib-esm", "config.js"),
+		"export default {};\n",
+	);
+	writeFileSync(
+		join(packageDir, "lib-cjs", "config.js"),
+		"module.exports = {};\n",
+	);
 }
 
 describe("lazy package groups", () => {

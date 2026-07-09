@@ -20,6 +20,7 @@ import type {
 	ApprovalReason,
 	DatabaseSchema,
 	QcpConfig,
+	SafetyLevel,
 } from "./types/index.js";
 
 export type QcpApprovalHandler = (
@@ -36,6 +37,7 @@ export interface QcpClientOptions {
 	readonly packageStoreDir?: string;
 	readonly installMissingPackages?: boolean;
 	readonly semanticEnabled?: boolean;
+	readonly safetyLevel?: SafetyLevel;
 	readonly approvalHandler?: QcpApprovalHandler;
 }
 
@@ -48,6 +50,7 @@ export interface QcpAskOptions {
 	readonly packageStoreDir?: string;
 	readonly installMissingPackages?: boolean;
 	readonly semanticEnabled?: boolean;
+	readonly safetyLevel?: SafetyLevel;
 	readonly approvalHandler?: QcpApprovalHandler;
 }
 
@@ -78,6 +81,7 @@ interface ResolvedSdkContext {
 	readonly packageStoreDir?: string;
 	readonly installMissingPackages: boolean;
 	readonly semanticEnabled: boolean;
+	readonly safetyLevel: SafetyLevel;
 	readonly approvalHandler?: QcpApprovalHandler;
 }
 
@@ -237,8 +241,15 @@ function resolveSdkContext(options: QcpClientOptions): ResolvedSdkContext {
 
 	return {
 		config: options.databaseUrl
-			? { ...activeConfig, databaseUrl: options.databaseUrl }
-			: activeConfig,
+			? {
+					...activeConfig,
+					databaseUrl: options.databaseUrl,
+					safetyLevel: options.safetyLevel ?? activeConfig.safetyLevel,
+				}
+			: {
+					...activeConfig,
+					safetyLevel: options.safetyLevel ?? activeConfig.safetyLevel,
+				},
 		connection,
 		connectionId: connection?.id,
 		connectionName: connection?.name ?? options.connectionName ?? "default",
@@ -247,6 +258,7 @@ function resolveSdkContext(options: QcpClientOptions): ResolvedSdkContext {
 		packageStoreDir: options.packageStoreDir,
 		installMissingPackages: options.installMissingPackages ?? false,
 		semanticEnabled: options.semanticEnabled ?? semanticStoreExists(),
+		safetyLevel: options.safetyLevel ?? activeConfig.safetyLevel,
 		approvalHandler: options.approvalHandler,
 	};
 }

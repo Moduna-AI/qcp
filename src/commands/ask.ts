@@ -50,6 +50,7 @@ import type {
 	ApprovalReason,
 	DatabaseSchema,
 	QueryMetrics,
+	SafetyLevel,
 } from "@/types/index.js";
 
 export interface AskOptions {
@@ -57,6 +58,7 @@ export interface AskOptions {
 	verbose?: boolean;
 	debug?: boolean;
 	safeMode?: boolean;
+	safetyLevel?: SafetyLevel;
 	noConfirm?: boolean;
 }
 
@@ -75,7 +77,10 @@ export async function askCommand(
 		await shutdownTelemetry();
 		process.exit(1);
 	}
-	const activeConfig = withActiveDatabaseConnection(config, connection);
+	const activeConfig = {
+		...withActiveDatabaseConnection(config, connection),
+		safetyLevel: resolveSafetyLevelOption(options, config.safetyLevel),
+	};
 	let questionForAgent = question;
 	let transferPackageGroup: PackageGroup | undefined;
 
@@ -349,8 +354,8 @@ async function confirmAskToolExecution(
 	config: ReturnType<typeof loadConfig>,
 	options: AskOptions,
 ): Promise<boolean> {
-	const safeMode = options.safeMode ?? config.safeMode;
-	if (!safeMode || options.noConfirm) return true;
+	const safetyLevel = resolveSafetyLevelOption(options, config.safetyLevel);
+	if (options.noConfirm && safetyLevel !== "strict") return true;
 
 	printApprovalWarning(reasons);
 	const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([
@@ -370,4 +375,14 @@ async function confirmAskToolExecution(
 	}
 
 	return confirmed;
+}
+
+function resolveSafetyLevelOption(
+	options: Pick<AskOptions, "safeMode" | "safetyLevel">,
+	configSafetyLevel: SafetyLevel,
+): SafetyLevel {
+	return (
+		options.safetyLevel ??
+		(options.safeMode === false ? "low" : configSafetyLevel)
+	);
 }

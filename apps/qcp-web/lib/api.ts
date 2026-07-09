@@ -7,12 +7,22 @@ export const loginRequestSchema = z.object({
 });
 
 export const setupRequestSchema = z.object({
-	passcode: z.string().trim().regex(/^\d{4}$/),
+	passcode: z
+		.string()
+		.trim()
+		.regex(/^\d{4}$/),
 });
+
+export const safetyLevelSchema = z.enum(["low", "standard", "strict"]);
 
 export const chatRequestSchema = z.object({
 	message: z.string().min(1),
 	connectionName: z.string().min(1).optional(),
+	safetyLevel: safetyLevelSchema.optional(),
+});
+
+export const safetyConfigRequestSchema = z.object({
+	safetyLevel: safetyLevelSchema,
 });
 
 export const approvalRequestSchema = z.object({

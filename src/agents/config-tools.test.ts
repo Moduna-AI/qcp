@@ -12,6 +12,7 @@ describe("config audit tools", () => {
 		expect(context.config).toEqual({
 			provider: "gemini",
 			model: "gemini-2.5-flash",
+			safetyLevel: "standard",
 			safeMode: true,
 			showSql: true,
 			showMetrics: false,
@@ -100,6 +101,7 @@ function configWithConnections(): QcpConfig {
 		provider: "gemini",
 		model: "gemini-2.5-flash",
 		telemetry: true,
+		safetyLevel: "standard",
 		safeMode: true,
 		showSql: true,
 		showMetrics: false,

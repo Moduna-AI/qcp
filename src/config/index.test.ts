@@ -40,6 +40,27 @@ describe("database type config", () => {
 		expect(config.databaseConnections).toEqual([]);
 		expect(config.prismaSchemaPath).toBeUndefined();
 		expect(config.prismaDatasourceName).toBeUndefined();
+		expect(config.safetyLevel).toBe("standard");
+	});
+
+	test("migrates legacy disabled safe mode to low safety level", () => {
+		const config = parseQcpConfig({
+			safeMode: false,
+		});
+
+		expect(config.safetyLevel).toBe("low");
+		expect(config.safeMode).toBe(false);
+	});
+
+	test("parses explicit safety levels", () => {
+		const config = parseQcpConfig({
+			safetyLevel: "strict",
+			safeMode: false,
+		});
+
+		expect(config.safetyLevel).toBe("strict");
+		expect(config.safeMode).toBe(true);
+		expect(() => parseQcpConfig({ safetyLevel: "unsafe" })).toThrow();
 	});
 
 	test("migrates legacy database fields into a named connection", () => {

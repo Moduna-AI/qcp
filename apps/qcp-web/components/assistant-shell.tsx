@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import type { QcpWebConnectionSummary } from "@moduna/qcp/web";
+import { useEffect, useMemo, useState } from "react";
 import { parseStreamEvent, type QcpWebStreamEvent } from "~/lib/api";
 
 interface ChatMessage {
@@ -17,22 +17,32 @@ interface PendingApproval {
 	readonly args?: unknown;
 }
 
+type SafetyLevel = "low" | "standard" | "strict";
+
 export function AssistantShell(): React.ReactElement {
 	const [connections, setConnections] = useState<QcpWebConnectionSummary[]>([]);
-	const [selectedConnection, setSelectedConnection] = useState<string | undefined>();
+	const [selectedConnection, setSelectedConnection] = useState<
+		string | undefined
+	>();
+	const [safetyLevel, setSafetyLevel] = useState<SafetyLevel>("standard");
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [input, setInput] = useState("");
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | undefined>();
-	const [pendingApproval, setPendingApproval] = useState<PendingApproval | undefined>();
+	const [pendingApproval, setPendingApproval] = useState<
+		PendingApproval | undefined
+	>();
 
 	useEffect(() => {
 		void loadConnections();
+		void loadSafetyConfig();
 	}, []);
 
 	const activeConnection = useMemo(
 		() =>
-			connections.find((connection) => connection.name === selectedConnection) ??
+			connections.find(
+				(connection) => connection.name === selectedConnection,
+			) ??
 			connections.find((connection) => connection.active) ??
 			connections[0],
 		[connections, selectedConnection],
@@ -54,12 +64,36 @@ export function AssistantShell(): React.ReactElement {
 		);
 	}
 
+	async function loadSafetyConfig(): Promise<void> {
+		const response = await fetch("/api/qcp/safety");
+		if (!response.ok) return;
+		const body = (await response.json()) as { safetyLevel: SafetyLevel };
+		setSafetyLevel(body.safetyLevel);
+	}
+
+	async function changeSafetyLevel(
+		nextSafetyLevel: SafetyLevel,
+	): Promise<void> {
+		setSafetyLevel(nextSafetyLevel);
+		const response = await fetch("/api/qcp/safety", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ safetyLevel: nextSafetyLevel }),
+		});
+		if (!response.ok) {
+			setError("Could not update safety level.");
+			await loadSafetyConfig();
+		}
+	}
+
 	async function logout(): Promise<void> {
 		await fetch("/api/auth/logout", { method: "POST" });
 		window.location.reload();
 	}
 
-	async function submit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+	async function submit(
+		event: React.FormEvent<HTMLFormElement>,
+	): Promise<void> {
 		event.preventDefault();
 		const message = input.trim();
 		if (!message || loading) return;
@@ -74,10 +108,15 @@ export function AssistantShell(): React.ReactElement {
 			{ id: assistantId, role: "assistant", text: "" },
 		]);
 		setLoading(true);
-		await postAndReadStream("/api/chat", {
-			message,
-			connectionName: activeConnection?.name,
-		}, assistantId);
+		await postAndReadStream(
+			"/api/chat",
+			{
+				message,
+				connectionName: activeConnection?.name,
+				safetyLevel,
+			},
+			assistantId,
+		);
 		setLoading(false);
 	}
 
@@ -91,16 +130,22 @@ export function AssistantShell(): React.ReactElement {
 			{
 				id: assistantId,
 				role: "assistant",
-				text: approve ? "Approved. Continuing...\n\n" : "Declined. Continuing...\n\n",
+				text: approve
+					? "Approved. Continuing...\n\n"
+					: "Declined. Continuing...\n\n",
 			},
 		]);
 		const approval = pendingApproval;
 		setPendingApproval(undefined);
-		await postAndReadStream("/api/chat/approve", {
-			runId: approval.runId,
-			toolCallId: approval.toolCallId,
-			approve,
-		}, assistantId);
+		await postAndReadStream(
+			"/api/chat/approve",
+			{
+				runId: approval.runId,
+				toolCallId: approval.toolCallId,
+				approve,
+			},
+			assistantId,
+		);
 		setLoading(false);
 	}
 
@@ -197,8 +242,26 @@ export function AssistantShell(): React.ReactElement {
 					</div>
 					<div className="row">
 						<strong>Safety</strong>
-						<span>read-only tools with approval gates</span>
+						<span>{safetyLevel}</span>
 					</div>
+				</div>
+
+				<div className="section-title">Safety Level</div>
+				<div className="status">
+					<label className="field">
+						<span>Mode</span>
+						<select
+							className="input"
+							onChange={(event) =>
+								void changeSafetyLevel(event.target.value as SafetyLevel)
+							}
+							value={safetyLevel}
+						>
+							<option value="low">Low</option>
+							<option value="standard">Standard</option>
+							<option value="strict">Strict</option>
+						</select>
+					</label>
 				</div>
 			</aside>
 
@@ -222,7 +285,8 @@ export function AssistantShell(): React.ReactElement {
 						<div className="message">
 							<div className="label mono">assistant</div>
 							Ask about tables, relationships, counts, trends, or query plans.
-							qcp-web uses the same local qcp config and Mastra agents as the CLI.
+							qcp-web uses the same local qcp config and Mastra agents as the
+							CLI.
 						</div>
 					) : (
 						messages.map((message) => (
@@ -269,7 +333,9 @@ export function AssistantShell(): React.ReactElement {
 						/>
 						<button
 							className="button"
-							disabled={!input.trim() || !activeConnection?.schemaAvailable || loading}
+							disabled={
+								!input.trim() || !activeConnection?.schemaAvailable || loading
+							}
 							type="submit"
 						>
 							Send

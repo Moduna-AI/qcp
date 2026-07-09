@@ -122,6 +122,7 @@ function configWith(
 		provider: overrides.provider,
 		model: overrides.provider === "ollama" ? "qwen3" : "gemini-2.5-flash",
 		telemetry: false,
+		safetyLevel: "standard",
 		safeMode: true,
 		showSql: true,
 		showMetrics: false,

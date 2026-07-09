@@ -58,7 +58,11 @@ import type {
 	DatabaseTransferDirection,
 	DatabaseTransferFormat,
 } from "@/transfer/types.js";
-import type { ApprovalReason, DatabaseSchema } from "@/types/index.js";
+import type {
+	ApprovalReason,
+	DatabaseSchema,
+	SafetyLevel,
+} from "@/types/index.js";
 
 const HELP_COMMANDS = new Set(["/help", "?", "help"]);
 const EXIT_COMMANDS = new Set([
@@ -83,6 +87,7 @@ interface ChatSession {
 
 export interface ChatOptions {
 	noConfirm?: boolean;
+	safetyLevel?: SafetyLevel;
 }
 
 // ─── Main REPL loop ────────────────────────────────────────────────────────────
@@ -98,7 +103,10 @@ export async function chatCommand(options: ChatOptions = {}): Promise<void> {
 		await shutdownTelemetry();
 		process.exit(1);
 	}
-	const activeConfig = withActiveDatabaseConnection(config, connection);
+	const activeConfig = {
+		...withActiveDatabaseConnection(config, connection),
+		safetyLevel: options.safetyLevel ?? config.safetyLevel,
+	};
 
 	// ── Startup ────────────────────────────────────────────────────────────────
 	printBanner();
@@ -450,7 +458,8 @@ async function confirmChatToolExecution(
 	config: ReturnType<typeof loadConfig>,
 	options: ChatOptions,
 ): Promise<boolean> {
-	if (!config.safeMode || options.noConfirm) return true;
+	const safetyLevel = options.safetyLevel ?? config.safetyLevel;
+	if (options.noConfirm && safetyLevel !== "strict") return true;
 
 	printApprovalWarning(reasons);
 	const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([

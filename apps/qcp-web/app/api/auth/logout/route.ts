@@ -1,5 +1,5 @@
-import { cookies } from "next/headers";
 import { logoutQcpWeb } from "@moduna/qcp/web";
+import { cookies } from "next/headers";
 import { SESSION_COOKIE } from "~/lib/api";
 
 export async function POST(): Promise<Response> {
