@@ -92,6 +92,28 @@ function writeNestedExportPackage(store: string, packageName: string): void {
 	);
 }
 
+function writeSubpathOnlyExportPackage(store: string, packageName: string): void {
+	const packageDir = join(store, "node_modules", ...packageName.split("/"));
+	mkdirSync(join(packageDir, "lib-esm"), { recursive: true });
+	mkdirSync(join(packageDir, "lib-cjs"), { recursive: true });
+	writeFileSync(
+		join(packageDir, "package.json"),
+		JSON.stringify({
+			name: packageName,
+			version: "1.0.0",
+			type: "module",
+			exports: {
+				"./config": {
+					import: "./lib-esm/config.js",
+					require: "./lib-cjs/config.js",
+				},
+			},
+		}),
+	);
+	writeFileSync(join(packageDir, "lib-esm", "config.js"), "export default {};\n");
+	writeFileSync(join(packageDir, "lib-cjs", "config.js"), "module.exports = {};\n");
+}
+
 describe("lazy package groups", () => {
 	test("maps providers to package groups", () => {
 		expect(providerPackageGroup("gemini")).toBe("provider-gemini");
@@ -150,6 +172,17 @@ describe("lazy package groups", () => {
 
 		expect(status.installed).toBe(false);
 		expect(status.missingPackages).toEqual(["@libsql/core"]);
+	});
+
+	test("semantic SQLite group accepts subpath-only libSQL core package", () => {
+		const store = tempStore();
+		writeNestedExportPackage(store, "@libsql/client");
+		writeSubpathOnlyExportPackage(store, "@libsql/core");
+
+		const status = getPackageGroupStatus("semantic", store);
+
+		expect(status.installed).toBe(true);
+		expect(status.missingPackages).toEqual([]);
 	});
 
 	test("built-in groups are installed without npm packages", () => {

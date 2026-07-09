@@ -6,6 +6,7 @@
 	},
 	"include": [
 		"src/index.ts",
+		"src/web.ts",
 		"src/types/index.ts",
 		"src/safety/index.ts",
 		"src/schema/index.ts",

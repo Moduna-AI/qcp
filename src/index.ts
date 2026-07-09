@@ -10,6 +10,24 @@ export {
 	QcpSdkRuntimeDependencyError,
 } from "./sdk.js";
 
+export {
+	auditQcpWebRuntimePackages,
+	createQcpWebSupervisor,
+	ensureQcpWebAuthSetup,
+	listQcpWebConnections,
+	loginQcpWeb,
+	logoutQcpWeb,
+	resolveQcpWebConnection,
+	validateQcpWebSession,
+	QcpWebAuthError,
+	QcpWebConfigurationError,
+	QcpWebRuntimeDependencyError,
+	type QcpWebAuthSetup,
+	type QcpWebConnectionSummary,
+	type QcpWebResolvedConnection,
+	type QcpWebSupervisorSession,
+} from "./web.js";
+
 export type {
 	ActiveDatabaseConnection,
 	ApprovalReason,
@@ -18,6 +36,7 @@ export type {
 	DatabaseType,
 	ProviderName,
 	QcpConfig,
+	QcpWebAuthConfig,
 	QueryResult,
 	SafetyReport,
 	SchemaColumn,
