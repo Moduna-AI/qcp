@@ -14,19 +14,19 @@
 		"test": "bun test"
 	},
 	"dependencies": {
-		"@ai-sdk/react": "4.0.18",
+		"@ai-sdk/react": "4.0.19",
 		"@mastra/ai-sdk": "1.6.1",
 		"@moduna/qcp": "file:../..",
-		"ai": "7.0.17",
+		"ai": "7.0.18",
 		"next": "16.2.10",
 		"react": "19.2.7",
 		"react-dom": "19.2.7",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {
-		"@types/node": "^26.1.0",
-		"@types/react": "^19.2.7",
+		"@types/node": "^26.1.1",
+		"@types/react": "^19.2.17",
 		"@types/react-dom": "^19.2.3",
-		"typescript": "^6.0.3"
+		"typescript": "^7.0.2"
 	}
 }

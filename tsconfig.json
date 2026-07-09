@@ -24,7 +24,7 @@
 		"noUnusedLocals": false,
 		"noUnusedParameters": false,
 		"exactOptionalPropertyTypes": false,
-		"types": ["bun-types"]
+		"types": ["bun-types", "bun"]
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules", "dist", "tests"]
