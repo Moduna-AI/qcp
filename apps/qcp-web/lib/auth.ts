@@ -1,5 +1,5 @@
-import { cookies } from "next/headers";
 import { validateQcpWebSession } from "@moduna/qcp/web";
+import { cookies } from "next/headers";
 import { SESSION_COOKIE } from "./api";
 
 export async function isAuthenticated(): Promise<boolean> {

@@ -54,6 +54,7 @@ export async function createProviderDatabaseAgent(
 			schema: options.schema,
 			sensitiveTablePatterns: options.config.sensitiveTablePatterns,
 			approvalHandler: options.approvalHandler,
+			safetyLevel: options.config.safetyLevel,
 			auditContext: options.auditContext,
 			refreshSchemaAfterImport: createSchemaRefreshHandler(options),
 		}),
@@ -75,6 +76,7 @@ export async function createProviderDatabaseAgent(
 				prismaSchemaPath: options.config.prismaSchemaPath,
 				datasourceName: options.config.prismaDatasourceName,
 				sensitiveTablePatterns: options.config.sensitiveTablePatterns,
+				safetyLevel: options.config.safetyLevel,
 				auditContext: options.auditContext,
 				tools,
 			});

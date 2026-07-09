@@ -41,12 +41,14 @@ import type {
 	ApprovalReason,
 	DatabaseSchema,
 	LLMProvider,
+	SafetyLevel,
 	SqlGenerationResult,
 } from "@/types";
 
 export interface ExplainOptions {
 	showPlan?: boolean;
 	safeMode?: boolean;
+	safetyLevel?: SafetyLevel;
 	noConfirm?: boolean;
 }
 
@@ -64,7 +66,10 @@ export async function explainCommand(
 		await shutdownTelemetry();
 		process.exit(1);
 	}
-	const activeConfig = withActiveDatabaseConnection(config, connection);
+	const activeConfig = {
+		...withActiveDatabaseConnection(config, connection),
+		safetyLevel: resolveSafetyLevelOption(options, config.safetyLevel),
+	};
 
 	// ── Load schema ─────────────────────────────────────────────────────────────
 	const schemaSpinner = ora("Loading schema...").start();
@@ -164,6 +169,7 @@ export async function explainCommand(
 				databaseUrl: connection.databaseUrl,
 				schema,
 				sensitiveTablePatterns: activeConfig.sensitiveTablePatterns,
+				safetyLevel: activeConfig.safetyLevel,
 				approvalHandler: async (reasons, approvedSql) =>
 					confirmExplainInspection(reasons, approvedSql, activeConfig, options),
 			},
@@ -222,8 +228,8 @@ async function confirmExplainInspection(
 	config: ReturnType<typeof loadConfig>,
 	options: ExplainOptions,
 ): Promise<boolean> {
-	const safeMode = options.safeMode ?? config.safeMode;
-	if (!safeMode || options.noConfirm) return true;
+	const safetyLevel = resolveSafetyLevelOption(options, config.safetyLevel);
+	if (options.noConfirm && safetyLevel !== "strict") return true;
 
 	printApprovalWarning(reasons);
 	const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([
@@ -243,6 +249,16 @@ async function confirmExplainInspection(
 	}
 
 	return confirmed;
+}
+
+function resolveSafetyLevelOption(
+	options: Pick<ExplainOptions, "safeMode" | "safetyLevel">,
+	configSafetyLevel: SafetyLevel,
+): SafetyLevel {
+	return (
+		options.safetyLevel ??
+		(options.safeMode === false ? "low" : configSafetyLevel)
+	);
 }
 
 function printQueryPerformanceAnalysis(

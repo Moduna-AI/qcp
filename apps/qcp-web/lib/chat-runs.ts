@@ -73,7 +73,12 @@ export function streamMastraOutput(
 			async start(controller) {
 				try {
 					if (output.fullStream) {
-						await streamFullOutput(controller, output.fullStream, output.runId, pending);
+						await streamFullOutput(
+							controller,
+							output.fullStream,
+							output.runId,
+							pending,
+						);
 					} else if (output.textStream) {
 						for await (const chunk of output.textStream) {
 							writeEvent(controller, { type: "text", text: chunk });
@@ -81,7 +86,8 @@ export function streamMastraOutput(
 					}
 					writeEvent(controller, { type: "done" });
 				} catch (error: unknown) {
-					const message = error instanceof Error ? error.message : String(error);
+					const message =
+						error instanceof Error ? error.message : String(error);
 					writeEvent(controller, { type: "error", error: message });
 					writeEvent(controller, { type: "done" });
 				} finally {
@@ -141,7 +147,8 @@ function getChunkText(chunk: unknown): string | undefined {
 	if (typeof chunk.textDelta === "string") return chunk.textDelta;
 	if (isRecord(chunk.payload)) {
 		if (typeof chunk.payload.text === "string") return chunk.payload.text;
-		if (typeof chunk.payload.textDelta === "string") return chunk.payload.textDelta;
+		if (typeof chunk.payload.textDelta === "string")
+			return chunk.payload.textDelta;
 	}
 	return undefined;
 }
@@ -158,7 +165,8 @@ function getApprovalPayload(chunk: unknown): {
 		runId: typeof payload.runId === "string" ? payload.runId : undefined,
 		toolCallId:
 			typeof payload.toolCallId === "string" ? payload.toolCallId : undefined,
-		toolName: typeof payload.toolName === "string" ? payload.toolName : undefined,
+		toolName:
+			typeof payload.toolName === "string" ? payload.toolName : undefined,
 		args: "args" in payload ? payload.args : undefined,
 	};
 }

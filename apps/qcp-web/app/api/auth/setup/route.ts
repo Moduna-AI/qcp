@@ -1,10 +1,10 @@
-import { cookies } from "next/headers";
 import {
 	initializeQcpWebAuth,
 	loginQcpWeb,
 	QcpWebAuthError,
 } from "@moduna/qcp/web";
-import { setupRequestSchema, SESSION_COOKIE } from "~/lib/api";
+import { cookies } from "next/headers";
+import { SESSION_COOKIE, setupRequestSchema } from "~/lib/api";
 
 export async function POST(request: Request): Promise<Response> {
 	const parsed = setupRequestSchema.safeParse(

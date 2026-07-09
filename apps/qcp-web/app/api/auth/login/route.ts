@@ -1,9 +1,11 @@
-import { cookies } from "next/headers";
 import { loginQcpWeb, QcpWebAuthError } from "@moduna/qcp/web";
+import { cookies } from "next/headers";
 import { loginRequestSchema, SESSION_COOKIE } from "~/lib/api";
 
 export async function POST(request: Request): Promise<Response> {
-	const parsed = loginRequestSchema.safeParse(await request.json().catch(() => ({})));
+	const parsed = loginRequestSchema.safeParse(
+		await request.json().catch(() => ({})),
+	);
 	if (!parsed.success) {
 		return Response.json({ error: "Passcode is required." }, { status: 400 });
 	}

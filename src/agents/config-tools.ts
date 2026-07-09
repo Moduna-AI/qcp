@@ -33,6 +33,7 @@ const configContextSchema = z.object({
 	config: z.object({
 		provider: z.string(),
 		model: z.string(),
+		safetyLevel: z.enum(["low", "standard", "strict"]),
 		safeMode: z.boolean(),
 		showSql: z.boolean(),
 		showMetrics: z.boolean(),
@@ -111,6 +112,7 @@ export function buildConfigContext(
 		config: {
 			provider: config.provider,
 			model: config.model,
+			safetyLevel: config.safetyLevel,
 			safeMode: config.safeMode,
 			showSql: config.showSql,
 			showMetrics: config.showMetrics,

@@ -18,14 +18,16 @@ import {
 	QueryPerformanceAnalyzer,
 } from "@/performance/query-performance-analyzer.js";
 import {
+	approvalReasonsForSafetyLevel,
 	enforceTenantIsolation,
 	getApprovalReasons,
-	requiresSensitiveApproval,
+	requiresSafetyApproval,
 	sanitizeDatabaseError,
 	sanitizeSensitiveData,
 	securityRequestContextSchema,
 	validateSql,
 } from "@/safety/index.js";
+import type { DatabaseSafetyToolKind } from "@/safety/policy.js";
 import { DatabaseTransferService } from "@/transfer/database-transfer-service.js";
 import type {
 	TransferExportRequest,
@@ -36,6 +38,7 @@ import type {
 	ApprovalReason,
 	DatabaseSchema,
 	QueryResult,
+	SafetyLevel,
 	SecureQueryError,
 	SecurityRequestContext,
 } from "@/types/index.js";
@@ -76,7 +79,13 @@ const tenantIsolationReportSchema = z.object({
 });
 
 const approvalReasonSchema = z.object({
-	type: z.enum(["sensitive_table", "large_scan", "no_limit", "high_cost"]),
+	type: z.enum([
+		"sensitive_table",
+		"large_scan",
+		"no_limit",
+		"high_cost",
+		"strict_mode",
+	]),
 	detail: z.string(),
 });
 
@@ -163,6 +172,7 @@ export interface CreateDatabaseToolsOptions {
 	readonly enforceTenantIsolation?: boolean;
 	readonly prismaSchemaPath?: string;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
+	readonly safetyLevel?: SafetyLevel;
 	readonly auditContext?: AuditContext;
 	readonly transferService?: DatabaseTransferService;
 	readonly refreshSchemaAfterImport?: () => Promise<void>;
@@ -173,6 +183,7 @@ export function createDatabaseTools(
 ): ToolsInput {
 	const queryExecutor = options.queryExecutor ?? executeQuery;
 	const explainExecutor = options.explainExecutor ?? explainQuery;
+	const safetyLevel = options.safetyLevel ?? "standard";
 	const sensitiveTablePatterns = [...(options.sensitiveTablePatterns ?? [])];
 	const transferService =
 		options.transferService ??
@@ -188,6 +199,7 @@ export function createDatabaseTools(
 						queryExecutor,
 						sensitiveTablePatterns,
 						approvalHandler: options.approvalHandler,
+						safetyLevel,
 						auditContext: options.auditContext,
 					},
 					sql,
@@ -287,8 +299,10 @@ export function createDatabaseTools(
 					schema: options.schema,
 					sensitiveTablePatterns,
 					explainExecutor,
+					safetyLevel,
 					enforceTenantIsolation: options.enforceTenantIsolation ?? false,
 					requestContext: context?.requestContext,
+					toolKind: "read",
 				}),
 			toModelOutput: sanitizedToolModelOutput,
 			transform: secureToolTransform(),
@@ -310,6 +324,7 @@ export function createDatabaseTools(
 						sensitiveTablePatterns,
 						enforceTenantIsolation: options.enforceTenantIsolation ?? false,
 						approvalHandler: options.approvalHandler,
+						safetyLevel,
 						auditContext: options.auditContext,
 					},
 					sql,
@@ -351,8 +366,10 @@ export function createDatabaseTools(
 					schema: options.schema,
 					sensitiveTablePatterns,
 					explainExecutor,
+					safetyLevel,
 					enforceTenantIsolation: options.enforceTenantIsolation ?? false,
 					requestContext: context?.requestContext,
+					toolKind: "explain",
 				}),
 			toModelOutput: sanitizedToolModelOutput,
 			transform: secureToolTransform(),
@@ -374,6 +391,7 @@ export function createDatabaseTools(
 						sensitiveTablePatterns,
 						enforceTenantIsolation: options.enforceTenantIsolation ?? false,
 						approvalHandler: options.approvalHandler,
+						safetyLevel,
 						auditContext: options.auditContext,
 					},
 					sql,
@@ -416,8 +434,10 @@ export function createDatabaseTools(
 					schema: options.schema,
 					sensitiveTablePatterns,
 					explainExecutor,
+					safetyLevel,
 					enforceTenantIsolation: options.enforceTenantIsolation ?? false,
 					requestContext: context?.requestContext,
+					toolKind: "performance",
 				}),
 			toModelOutput: sanitizedToolModelOutput,
 			transform: secureToolTransform(),
@@ -439,6 +459,7 @@ export function createDatabaseTools(
 						sensitiveTablePatterns,
 						enforceTenantIsolation: options.enforceTenantIsolation ?? false,
 						approvalHandler: options.approvalHandler,
+						safetyLevel,
 						auditContext: options.auditContext,
 					},
 					sql,
@@ -466,6 +487,11 @@ export function createDatabaseTools(
 					message: "Export requires either sql or table.",
 				}),
 			outputSchema: transferResultSchema,
+			requireApproval: async () =>
+				requiresSafetyApproval({
+					safetyLevel,
+					toolKind: "export",
+				}),
 			toModelOutput: sanitizedToolModelOutput,
 			transform: secureToolTransform(),
 			mcp: {
@@ -477,8 +503,26 @@ export function createDatabaseTools(
 					openWorldHint: false,
 				},
 			},
-			execute: async (input) =>
-				transferService.exportData(input as TransferExportRequest),
+			execute: async (input) => {
+				const request = input as TransferExportRequest;
+				const approved = await confirmTransferApproval({
+					approvalHandler: options.approvalHandler,
+					safetyLevel,
+					toolKind: "export",
+					reasons: [],
+					operation: formatExportOperation(request),
+				});
+				if (!approved) {
+					return {
+						ok: false,
+						direction: "export",
+						format: request.format,
+						filePath: request.filePath,
+						error: "Export requires approval before writing database data.",
+					} satisfies TransferResult;
+				}
+				return transferService.exportData(request);
+			},
 		}),
 		qcp_import_database_data: createTool({
 			id: "qcp_import_database_data",
@@ -508,6 +552,8 @@ export function createDatabaseTools(
 				const request = input as TransferImportRequest;
 				const approved = await confirmTransferApproval({
 					approvalHandler: options.approvalHandler,
+					safetyLevel,
+					toolKind: "import",
 					reasons: [
 						{
 							type: "large_scan",
@@ -539,6 +585,7 @@ export interface SecureReadOptions {
 	readonly sensitiveTablePatterns?: readonly string[];
 	readonly enforceTenantIsolation?: boolean;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
+	readonly safetyLevel?: SafetyLevel;
 	readonly auditContext?: AuditContext;
 }
 
@@ -549,6 +596,7 @@ export interface SecureExplainOptions {
 	readonly sensitiveTablePatterns?: readonly string[];
 	readonly enforceTenantIsolation?: boolean;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
+	readonly safetyLevel?: SafetyLevel;
 	readonly auditContext?: AuditContext;
 }
 
@@ -629,6 +677,8 @@ export async function executeSecureReadQuery(
 		approvalHandler: options.approvalHandler,
 		auditContext: options.auditContext,
 		action: "READ",
+		toolKind: "read",
+		safetyLevel: options.safetyLevel ?? "standard",
 		safety: base.safety,
 		isolation: base.isolation,
 	});
@@ -737,6 +787,8 @@ export async function executeSecureExplainQuery(
 			approvalHandler: options.approvalHandler,
 			auditContext: options.auditContext,
 			action: "EXPLAIN",
+			toolKind: "explain",
+			safetyLevel: options.safetyLevel ?? "standard",
 			safety: base.safety,
 			isolation: base.isolation,
 		});
@@ -831,6 +883,8 @@ export async function executeSecureQueryImprovementAnalysis(
 		approvalHandler: options.approvalHandler,
 		auditContext: options.auditContext,
 		action: "EXPLAIN",
+		toolKind: "performance",
+		safetyLevel: options.safetyLevel ?? "standard",
 		safety: base.safety,
 		isolation: base.isolation,
 	});
@@ -880,6 +934,11 @@ export async function executeSecureQueryImprovementAnalysis(
 			approvalHandler: options.approvalHandler,
 			auditContext: options.auditContext,
 			action: "EXPLAIN",
+			toolKind: "performance",
+			safetyLevel:
+				options.safetyLevel === "strict"
+					? "low"
+					: (options.safetyLevel ?? "standard"),
 			safety: base.safety,
 			isolation: base.isolation,
 		});
@@ -1026,6 +1085,8 @@ interface ApprovalCheckOptions {
 	readonly schema: DatabaseSchema;
 	readonly sensitiveTablePatterns: readonly string[];
 	readonly explainExecutor: DatabaseExplainExecutor;
+	readonly safetyLevel: SafetyLevel;
+	readonly toolKind: DatabaseSafetyToolKind;
 	readonly enforceTenantIsolation: boolean;
 	readonly requestContext?: unknown;
 }
@@ -1042,9 +1103,13 @@ async function shouldRequireDatabaseToolApproval(
 	if (!processedSql) return false;
 
 	if (
-		requiresSensitiveApproval(processedSql, safety, [
-			...options.sensitiveTablePatterns,
-		])
+		requiresSafetyApproval({
+			safetyLevel: options.safetyLevel,
+			toolKind: options.toolKind,
+			approvalReasons: getApprovalReasons(processedSql, safety, [
+				...options.sensitiveTablePatterns,
+			]),
+		})
 	) {
 		return true;
 	}
@@ -1060,7 +1125,11 @@ async function shouldRequireDatabaseToolApproval(
 			[...options.sensitiveTablePatterns],
 			explain.estimatedRows,
 		);
-		return reasons.some((reason) => reason.type === "high_cost");
+		return requiresSafetyApproval({
+			safetyLevel: options.safetyLevel,
+			toolKind: options.toolKind,
+			approvalReasons: reasons,
+		});
 	} catch {
 		return true;
 	}
@@ -1089,12 +1158,22 @@ function getTenantScopedSql(
 	return isolation.processedSql;
 }
 
+function formatExportOperation(request: TransferExportRequest): string {
+	if (request.sql) return `EXPORT QUERY TO ${request.filePath}`;
+	if (request.table) {
+		return `EXPORT TABLE ${request.table.schema ?? "public"}.${request.table.table} TO ${request.filePath}`;
+	}
+	return `EXPORT DATABASE DATA TO ${request.filePath}`;
+}
+
 interface ApprovalConfirmationOptions {
 	readonly reasons: readonly ApprovalReason[];
 	readonly sql: string;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
 	readonly auditContext?: AuditContext;
 	readonly action: "READ" | "EXPLAIN";
+	readonly toolKind: DatabaseSafetyToolKind;
+	readonly safetyLevel: SafetyLevel;
 	readonly safety: ReturnType<typeof validateSql>;
 	readonly isolation?: ReturnType<typeof enforceTenantIsolation>;
 }
@@ -1102,7 +1181,20 @@ interface ApprovalConfirmationOptions {
 async function confirmApprovalIfNeeded(
 	options: ApprovalConfirmationOptions,
 ): Promise<boolean> {
-	if (options.reasons.length === 0) return true;
+	if (
+		!requiresSafetyApproval({
+			safetyLevel: options.safetyLevel,
+			toolKind: options.toolKind,
+			approvalReasons: options.reasons,
+		})
+	) {
+		return true;
+	}
+	const approvalReasons = approvalReasonsForSafetyLevel({
+		safetyLevel: options.safetyLevel,
+		toolKind: options.toolKind,
+		approvalReasons: options.reasons,
+	});
 
 	await auditDatabaseAccess({
 		context: options.auditContext,
@@ -1111,16 +1203,13 @@ async function confirmApprovalIfNeeded(
 		sql: options.sql,
 		safety: options.safety,
 		isolation: options.isolation,
-		approvalReasons: options.reasons,
+		approvalReasons,
 		metadata: { requestedAction: options.action },
 	});
 
 	if (!options.approvalHandler) return false;
 
-	const approved = await options.approvalHandler(
-		[...options.reasons],
-		options.sql,
-	);
+	const approved = await options.approvalHandler(approvalReasons, options.sql);
 	await auditDatabaseAccess({
 		context: options.auditContext,
 		action: approved ? "APPROVAL_GRANTED" : "APPROVAL_DENIED",
@@ -1128,7 +1217,7 @@ async function confirmApprovalIfNeeded(
 		sql: options.sql,
 		safety: options.safety,
 		isolation: options.isolation,
-		approvalReasons: options.reasons,
+		approvalReasons,
 		metadata: { requestedAction: options.action },
 	});
 
@@ -1137,11 +1226,29 @@ async function confirmApprovalIfNeeded(
 
 async function confirmTransferApproval(options: {
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
+	readonly safetyLevel: SafetyLevel;
+	readonly toolKind: Extract<DatabaseSafetyToolKind, "export" | "import">;
 	readonly reasons: readonly ApprovalReason[];
 	readonly operation: string;
 }): Promise<boolean> {
+	if (
+		!requiresSafetyApproval({
+			safetyLevel: options.safetyLevel,
+			toolKind: options.toolKind,
+			approvalReasons: options.reasons,
+		})
+	) {
+		return true;
+	}
 	if (!options.approvalHandler) return false;
-	return options.approvalHandler([...options.reasons], options.operation);
+	return options.approvalHandler(
+		approvalReasonsForSafetyLevel({
+			safetyLevel: options.safetyLevel,
+			toolKind: options.toolKind,
+			approvalReasons: options.reasons,
+		}),
+		options.operation,
+	);
 }
 
 interface AuditDatabaseAccessOptions {

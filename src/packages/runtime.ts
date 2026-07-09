@@ -6,8 +6,8 @@ import {
 	getPackageGroupStatus,
 	getPackageStoreDir,
 	installPackageGroup,
-	type PackageGroup,
 	type PackageCommandRunner,
+	type PackageGroup,
 	type PackageGroupStatus,
 	providerPackageGroup,
 } from "./lazy-packages.js";
@@ -105,7 +105,10 @@ export async function ensurePackageGroups(
 export async function installMissingPackageGroups(
 	options: InstallMissingPackageGroupsOptions,
 ): Promise<void> {
-	const { missingGroups } = auditPackageGroups(options.groups, options.targetDir);
+	const { missingGroups } = auditPackageGroups(
+		options.groups,
+		options.targetDir,
+	);
 	if (missingGroups.length === 0) return;
 
 	for (const group of missingGroups) {

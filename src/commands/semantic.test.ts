@@ -173,6 +173,7 @@ function writeConfigAndSchema(home: string): void {
 		provider: "gemini",
 		model: "gemini-2.5-flash",
 		telemetry: false,
+		safetyLevel: "standard",
 		safeMode: true,
 		showSql: true,
 		showMetrics: false,

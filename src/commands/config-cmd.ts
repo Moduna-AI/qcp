@@ -7,6 +7,7 @@ import {
 	saveConfig,
 } from "@/config/index.js";
 import { printError, printSection, printSuccess } from "@/output/index.js";
+import { isSafetyLevel } from "@/safety/index.js";
 import type { ProviderName } from "@/types/index.js";
 
 const SETTABLE_BOOLEANS = ["safeMode", "showSql", "showMetrics", "telemetry"];
@@ -47,6 +48,7 @@ export function configShowCommand(): void {
 		console.log(`  Datasource:   ${chalk.dim(active.prismaDatasourceName)}`);
 	}
 	console.log();
+	console.log(`  Safety:      ${safetyLevelLabel(config.safetyLevel)}`);
 	console.log(`  Safe mode:    ${boolLabel(config.safeMode)}`);
 	console.log(`  Show SQL:     ${boolLabel(config.showSql)}`);
 	console.log(`  Metrics:      ${boolLabel(config.showMetrics)}`);
@@ -76,8 +78,31 @@ export function configSetCommand(key: string, value: string): void {
 			printError(`Invalid value for ${key}: must be true/false/on/off/1/0`);
 			process.exit(1);
 		}
-		saveConfig({ ...config, [key]: boolValue });
+		saveConfig({
+			...config,
+			[key]: boolValue,
+			...(key === "safeMode"
+				? { safetyLevel: boolValue ? "standard" : "low" }
+				: {}),
+		});
 		printSuccess(`${key} = ${boolValue}`);
+		return;
+	}
+
+	if (key === "safetyLevel") {
+		if (!isSafetyLevel(value)) {
+			printError(
+				`Invalid safety level: ${value}`,
+				"Valid levels: low, standard, strict",
+			);
+			process.exit(1);
+		}
+		saveConfig({
+			...config,
+			safetyLevel: value,
+			safeMode: value !== "low",
+		});
+		printSuccess(`${key} = ${value}`);
 		return;
 	}
 
@@ -103,7 +128,7 @@ export function configSetCommand(key: string, value: string): void {
 
 	printError(
 		`Unknown config key: ${key}`,
-		`Settable options: ${[...SETTABLE_BOOLEANS, ...SETTABLE_STRINGS, "databaseType"].join(", ")}`,
+		`Settable options: ${[...SETTABLE_BOOLEANS, ...SETTABLE_STRINGS, "safetyLevel", "databaseType"].join(", ")}`,
 	);
 	process.exit(1);
 }
@@ -138,6 +163,19 @@ export function configSetKeyCommand(provider: string, apiKey: string): void {
 
 function boolLabel(val: boolean): string {
 	return val ? chalk.green("enabled") : chalk.dim("disabled");
+}
+
+function safetyLevelLabel(value: string): string {
+	switch (value) {
+		case "low":
+			return chalk.yellow("low");
+		case "standard":
+			return chalk.green("standard");
+		case "strict":
+			return chalk.cyan("strict");
+		default:
+			return chalk.dim(value);
+	}
 }
 
 function keyLabel(key: string | undefined, envVar: string): string {

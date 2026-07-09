@@ -91,6 +91,7 @@ export interface PrismaAgentConfig<TAgentId extends string = string>
 	readonly prismaSchemaPath?: string;
 	readonly datasourceName?: string;
 	readonly sensitiveTablePatterns?: readonly string[];
+	readonly safetyLevel?: QcpConfig["safetyLevel"];
 	readonly queryExecutor?: PrismaQueryExecutor;
 	readonly explainExecutor?: PrismaExplainExecutor;
 	readonly auditContext?: AuditContext;
@@ -113,6 +114,7 @@ export class PrismaAgent<
 							prismaSchemaPath: config.prismaSchemaPath,
 							prismaDatasourceName: config.datasourceName,
 							sensitiveTablePatterns: config.sensitiveTablePatterns,
+							safetyLevel: config.safetyLevel,
 							queryExecutor: config.queryExecutor,
 							explainExecutor: config.explainExecutor,
 							auditContext: config.auditContext,
@@ -154,6 +156,7 @@ export interface CreatePrismaToolsOptions {
 	readonly prismaSchemaPath?: string;
 	readonly prismaDatasourceName?: string;
 	readonly sensitiveTablePatterns?: readonly string[];
+	readonly safetyLevel?: QcpConfig["safetyLevel"];
 	readonly queryExecutor?: PrismaQueryExecutor;
 	readonly explainExecutor?: PrismaExplainExecutor;
 	readonly auditContext?: AuditContext;
@@ -168,6 +171,7 @@ export function createPrismaTools(
 			schema: options.schema,
 			prismaSchemaPath: options.prismaSchemaPath,
 			sensitiveTablePatterns: options.sensitiveTablePatterns,
+			safetyLevel: options.safetyLevel,
 			queryExecutor: options.queryExecutor,
 			explainExecutor: options.explainExecutor,
 			enforceTenantIsolation: true,

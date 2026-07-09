@@ -12,6 +12,8 @@ import { printBanner } from "@/output/index.js";
 import { QCP_FULL_NAME, QCP_REPO, QCP_VERSION } from "@/version.js";
 
 const program = new Command();
+const SAFETY_LEVEL_CHOICES = ["low", "standard", "strict"] as const;
+type CliSafetyLevel = (typeof SAFETY_LEVEL_CHOICES)[number];
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
@@ -342,6 +344,10 @@ program
 	.option("--metrics", "Show token usage and timing metrics")
 	.option("--verbose", "Show additional generation details")
 	.option("--debug", "Show raw LLM output, prompts, and EXPLAIN plan")
+	.option(
+		"--safety-level <level>",
+		"Override safety level for this request (low, standard, strict)",
+	)
 	.option("--no-safe-mode", "Skip human approval prompts (advanced users only)")
 	.option("--yes", "Auto-approve all safety prompts")
 	.addHelpText(
@@ -362,6 +368,7 @@ ${chalk.bold("Examples:")}
 				verbose?: boolean;
 				debug?: boolean;
 				safeMode?: boolean;
+				safetyLevel?: string;
 				yes?: boolean;
 			},
 		) => {
@@ -370,6 +377,7 @@ ${chalk.bold("Examples:")}
 				metrics: options.metrics,
 				verbose: options.verbose,
 				debug: options.debug,
+				safetyLevel: parseCliSafetyLevel(options.safetyLevel),
 				safeMode: options.safeMode !== false,
 				noConfirm: options.yes,
 			});
@@ -382,6 +390,10 @@ program
 	.command("chat")
 	.description(
 		"Start interactive assistant mode — ask multiple questions in a session",
+	)
+	.option(
+		"--safety-level <level>",
+		"Override safety level for this session (low, standard, strict)",
 	)
 	.option("--yes", "Auto-approve all safety prompts")
 	.addHelpText(
@@ -397,9 +409,12 @@ ${chalk.bold("Examples:")}
   qcp chat --yes   (skip approval prompts)
 `,
 	)
-	.action(async (options: { yes?: boolean }) => {
+	.action(async (options: { safetyLevel?: string; yes?: boolean }) => {
 		const { chatCommand } = await import("../commands/chat.js");
-		await chatCommand({ noConfirm: options.yes });
+		await chatCommand({
+			safetyLevel: parseCliSafetyLevel(options.safetyLevel),
+			noConfirm: options.yes,
+		});
 	});
 
 // ─── explain ─────────────────────────────────────────────────────────────────
@@ -408,16 +423,26 @@ program
 	.command("explain <question>")
 	.description("Show SQL for a question without executing it")
 	.option("--plan", "Include PostgreSQL EXPLAIN output")
+	.option(
+		"--safety-level <level>",
+		"Override safety level for this request (low, standard, strict)",
+	)
 	.option("--no-safe-mode", "Skip human approval prompts (advanced users only)")
 	.option("--yes", "Auto-approve all safety prompts")
 	.action(
 		async (
 			question: string,
-			options: { plan?: boolean; safeMode?: boolean; yes?: boolean },
+			options: {
+				plan?: boolean;
+				safeMode?: boolean;
+				safetyLevel?: string;
+				yes?: boolean;
+			},
 		) => {
 			const { explainCommand } = await import("../commands/explain.js");
 			await explainCommand(question, {
 				showPlan: options.plan,
+				safetyLevel: parseCliSafetyLevel(options.safetyLevel),
 				safeMode: options.safeMode !== false,
 				noConfirm: options.yes,
 			});
@@ -488,6 +513,7 @@ configCmd
 		`
 ${chalk.bold("Keys:")}
   safeMode     true/false   Require approval before sensitive queries
+  safetyLevel  low/standard/strict  Select approval strictness
   showSql      true/false   Display generated SQL (default: true)
   showMetrics  true/false   Always show timing/token metrics
   telemetry    true/false   Anonymous usage analytics
@@ -610,3 +636,17 @@ program.parseAsync(process.argv).catch((err: unknown) => {
 	console.error(chalk.red("\n  ✗ ") + message);
 	process.exit(1);
 });
+
+function parseCliSafetyLevel(
+	value: string | undefined,
+): CliSafetyLevel | undefined {
+	if (value === undefined) return undefined;
+	if (SAFETY_LEVEL_CHOICES.includes(value as CliSafetyLevel)) {
+		return value as CliSafetyLevel;
+	}
+	console.error(
+		chalk.red(`Invalid safety level: ${value}`),
+		chalk.dim(`Expected one of: ${SAFETY_LEVEL_CHOICES.join(", ")}`),
+	);
+	process.exit(1);
+}

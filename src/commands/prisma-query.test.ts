@@ -28,6 +28,7 @@ function configWithDatabaseType(
 		provider: "gemini",
 		model: "gemini-2.5-flash",
 		telemetry: true,
+		safetyLevel: "standard",
 		safeMode: true,
 		showSql: true,
 		showMetrics: false,

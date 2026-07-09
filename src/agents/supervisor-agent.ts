@@ -155,9 +155,7 @@ export class QcpSupervisorAgent {
 		};
 	}
 
-	public async streamResponse(
-		question: string,
-	): Promise<ChatAgentRunResponse> {
+	public async streamResponse(question: string): Promise<ChatAgentRunResponse> {
 		const start = Date.now();
 		const promptViolation = classifyPromptViolation(question);
 		if (promptViolation) {

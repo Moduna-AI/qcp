@@ -9,25 +9,6 @@ export {
 	QcpSdkConfigurationError,
 	QcpSdkRuntimeDependencyError,
 } from "./sdk.js";
-
-export {
-	auditQcpWebRuntimePackages,
-	createQcpWebSupervisor,
-	ensureQcpWebAuthSetup,
-	listQcpWebConnections,
-	loginQcpWeb,
-	logoutQcpWeb,
-	resolveQcpWebConnection,
-	validateQcpWebSession,
-	QcpWebAuthError,
-	QcpWebConfigurationError,
-	QcpWebRuntimeDependencyError,
-	type QcpWebAuthSetup,
-	type QcpWebConnectionSummary,
-	type QcpWebResolvedConnection,
-	type QcpWebSupervisorSession,
-} from "./web.js";
-
 export type {
 	ActiveDatabaseConnection,
 	ApprovalReason,
@@ -44,3 +25,20 @@ export type {
 	SchemaIndex,
 	SchemaTable,
 } from "./types/index.js";
+export {
+	auditQcpWebRuntimePackages,
+	createQcpWebSupervisor,
+	ensureQcpWebAuthSetup,
+	listQcpWebConnections,
+	loginQcpWeb,
+	logoutQcpWeb,
+	QcpWebAuthError,
+	type QcpWebAuthSetup,
+	QcpWebConfigurationError,
+	type QcpWebConnectionSummary,
+	type QcpWebResolvedConnection,
+	QcpWebRuntimeDependencyError,
+	type QcpWebSupervisorSession,
+	resolveQcpWebConnection,
+	validateQcpWebSession,
+} from "./web.js";

@@ -10,6 +10,7 @@ import type {
 	DatabaseType,
 	ProviderName,
 	QcpConfig,
+	SafetyLevel,
 } from "@/types/index.js";
 import { DatabaseConnectionRegistry } from "./database-connection-registry.js";
 
@@ -50,6 +51,7 @@ export const DATABASE_TYPES = [
 ] as const satisfies readonly DatabaseType[];
 
 const DatabaseTypeSchema = z.enum(DATABASE_TYPES);
+const SafetyLevelSchema = z.enum(["low", "standard", "strict"]);
 
 const DatabaseConnectionConfigSchema = z.object({
 	id: z.string().min(1),
@@ -76,6 +78,7 @@ const QcpConfigSchema = z.object({
 		.default("gemini"),
 	model: z.string().default("gemini-2.5-flash"),
 	telemetry: z.boolean().default(true),
+	safetyLevel: SafetyLevelSchema.default("standard"),
 	safeMode: z.boolean().default(true),
 	showSql: z.boolean().default(true),
 	showMetrics: z.boolean().default(false),
@@ -160,7 +163,9 @@ export function loadConfig(): QcpConfig {
 			);
 			return parseQcpConfig(parsed);
 		}
-		return normalizeConfig(result.data as QcpConfig);
+		return normalizeConfig(
+			applyLegacySafetyLevel(parsed, result.data as QcpConfig),
+		);
 	} catch {
 		return createDefaultConfig();
 	}
@@ -180,13 +185,15 @@ export function createDefaultConfig(): QcpConfig {
 }
 
 export function parseQcpConfig(config: unknown): QcpConfig {
-	return normalizeConfig(QcpConfigSchema.parse(config) as QcpConfig);
+	const parsed = QcpConfigSchema.parse(config) as QcpConfig;
+	return normalizeConfig(applyLegacySafetyLevel(config, parsed));
 }
 
 function normalizeConfig(config: QcpConfig): QcpConfig {
 	const migrated = migrateLegacyDatabaseConnection(config);
 	const registry = new DatabaseConnectionRegistry(migrated);
 	const active = registry.resolveActive();
+	const safetyLevel = normalizeSafetyLevel(migrated.safetyLevel);
 
 	return {
 		...migrated,
@@ -197,7 +204,39 @@ function normalizeConfig(config: QcpConfig): QcpConfig {
 		prismaSchemaPath: active?.prismaSchemaPath ?? migrated.prismaSchemaPath,
 		prismaDatasourceName:
 			active?.prismaDatasourceName ?? migrated.prismaDatasourceName,
+		safetyLevel,
+		safeMode: safetyLevel !== "low",
 	};
+}
+
+function applyLegacySafetyLevel(
+	rawConfig: unknown,
+	parsedConfig: QcpConfig,
+): QcpConfig {
+	if (
+		isRecord(rawConfig) &&
+		!("safetyLevel" in rawConfig) &&
+		rawConfig.safeMode === false
+	) {
+		return {
+			...parsedConfig,
+			safetyLevel: "low",
+			safeMode: false,
+		};
+	}
+
+	return {
+		...parsedConfig,
+		safetyLevel: normalizeSafetyLevel(parsedConfig.safetyLevel),
+	};
+}
+
+function normalizeSafetyLevel(value: SafetyLevel): SafetyLevel {
+	return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object";
 }
 
 function migrateLegacyDatabaseConnection(config: QcpConfig): QcpConfig {
@@ -350,6 +389,7 @@ export function redactConfig(config: QcpConfig): Record<string, unknown> {
 		provider: config.provider,
 		model: config.model,
 		telemetry: config.telemetry,
+		safetyLevel: config.safetyLevel,
 		safeMode: config.safeMode,
 		showSql: config.showSql,
 		showMetrics: config.showMetrics,
