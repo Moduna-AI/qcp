@@ -177,12 +177,30 @@ export async function getDatabaseName(databaseUrl: string): Promise<string> {
 export async function checkReadOnlyUser(databaseUrl: string): Promise<boolean> {
 	const db = postgres(databaseUrl, { max: 1, connect_timeout: 10 });
 	try {
-		// Try to create a temp table — a truly read-only user cannot
-		await db`CREATE TEMP TABLE _qcp_rw_test (id int)`;
-		await db`DROP TABLE IF EXISTS _qcp_rw_test`;
-		return false; // has write permissions
+		const [result] = await db<{ readonly read_only: boolean }[]>`
+			SELECT NOT (
+				has_database_privilege(current_user, current_database(), 'CREATE')
+				OR EXISTS (
+					SELECT 1 FROM pg_namespace
+					WHERE nspname NOT IN ('pg_catalog', 'information_schema')
+					AND has_schema_privilege(current_user, oid, 'CREATE')
+				)
+				OR EXISTS (
+					SELECT 1 FROM information_schema.tables
+					WHERE table_type = 'BASE TABLE'
+					AND table_schema NOT IN ('pg_catalog', 'information_schema')
+					AND (
+						has_table_privilege(current_user, format('%I.%I', table_schema, table_name), 'INSERT')
+						OR has_table_privilege(current_user, format('%I.%I', table_schema, table_name), 'UPDATE')
+						OR has_table_privilege(current_user, format('%I.%I', table_schema, table_name), 'DELETE')
+						OR has_table_privilege(current_user, format('%I.%I', table_schema, table_name), 'TRUNCATE')
+					)
+				)
+			) AS read_only
+		`;
+		return result?.read_only ?? false;
 	} catch {
-		return true; // cannot write → read-only user
+		return false;
 	} finally {
 		await db.end().catch(() => {});
 	}

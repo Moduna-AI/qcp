@@ -68,11 +68,33 @@ describe("DatabaseConnectionManager", () => {
 		expect(result).toEqual({
 			ok: false,
 			operation: "add",
-			error: "password authentication failed",
+			error:
+				"Authentication failed. Verify the database username and password.",
 		});
 		expect(harness.saveCalls).toHaveLength(0);
 		expect(harness.savedSchemas).toHaveLength(0);
 		expect(harness.auditEvents[0]?.outcome).toBe("failure");
+	});
+
+	test("rejects invalid URIs before testing, saving, or scanning", async () => {
+		const harness = createHarness(createDefaultConfig());
+		const manager = new DatabaseConnectionManager(harness.dependencies);
+
+		const result = await manager.add({
+			name: "prod",
+			databaseType: "other-postgres",
+			databaseUrl: "host=localhost dbname=app",
+		});
+
+		expect(result).toEqual({
+			ok: false,
+			operation: "add",
+			error:
+				"Use a PostgreSQL URI beginning with postgres:// or postgresql://. Keyword/value connection strings are not supported.",
+		});
+		expect(harness.saveCalls).toHaveLength(0);
+		expect(harness.savedSchemas).toHaveLength(0);
+		expect(JSON.stringify(harness.auditEvents[0])).not.toContain("dbname=app");
 	});
 
 	test("edits a connection and removes stale schema when scan fails", async () => {

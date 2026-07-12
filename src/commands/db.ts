@@ -30,6 +30,7 @@ import {
 	normalizeOptional,
 	printCommonConnectionFixes,
 	printConnectionGuidance,
+	printConnectionWarnings,
 	printReadOnlyStatus,
 	printSchemaStatus,
 	validateConnectionName,
@@ -235,6 +236,7 @@ export async function dbEditCommand(
 		printInfo(`Prisma datasource: ${result.connection.prismaDatasourceName}`);
 	}
 	printReadOnlyStatus(result.readOnly);
+	printConnectionWarnings(result.connectionWarnings);
 	printSchemaStatus(result.connection.name, result.schema);
 }
 
