@@ -23,7 +23,10 @@ export async function POST(request: Request): Promise<Response> {
 		return Response.json({ ok: true, expiresAt: session.expiresAt });
 	} catch (error: unknown) {
 		if (error instanceof QcpWebAuthError) {
-			return Response.json({ error: error.message }, { status: 401 });
+			return Response.json(
+				{ error: "Authentication failed." },
+				{ status: 401 },
+			);
 		}
 		const message = error instanceof Error ? error.message : String(error);
 		return Response.json({ error: message }, { status: 500 });

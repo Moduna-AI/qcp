@@ -67,6 +67,7 @@ describe("neon database agent", () => {
 		});
 
 		expect(Object.keys(tools).sort()).toEqual([
+			"qcp_audit_postgres_privacy_posture",
 			"qcp_execute_read_sql",
 			"qcp_explain_read_sql",
 			"qcp_export_database_data",

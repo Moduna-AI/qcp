@@ -1,7 +1,7 @@
 "use client";
 
 import type { QcpWebConnectionSummary } from "@moduna/qcp/web";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { parseStreamEvent, type QcpWebStreamEvent } from "~/lib/api";
 
 interface ChatMessage {
@@ -33,11 +33,6 @@ export function AssistantShell(): React.ReactElement {
 		PendingApproval | undefined
 	>();
 
-	useEffect(() => {
-		void loadConnections();
-		void loadSafetyConfig();
-	}, []);
-
 	const activeConnection = useMemo(
 		() =>
 			connections.find(
@@ -48,7 +43,7 @@ export function AssistantShell(): React.ReactElement {
 		[connections, selectedConnection],
 	);
 
-	async function loadConnections(): Promise<void> {
+	const loadConnections = useCallback(async (): Promise<void> => {
 		const response = await fetch("/api/qcp/connections");
 		if (!response.ok) {
 			setError("Could not load qcp connections.");
@@ -62,23 +57,37 @@ export function AssistantShell(): React.ReactElement {
 			body.connections.find((connection) => connection.active)?.name ??
 				body.connections[0]?.name,
 		);
-	}
+	}, []);
 
-	async function loadSafetyConfig(): Promise<void> {
+	const loadSafetyConfig = useCallback(async (): Promise<void> => {
 		const response = await fetch("/api/qcp/safety");
 		if (!response.ok) return;
 		const body = (await response.json()) as { safetyLevel: SafetyLevel };
 		setSafetyLevel(body.safetyLevel);
-	}
+	}, []);
+
+	useEffect(() => {
+		void loadConnections();
+		void loadSafetyConfig();
+	}, [loadConnections, loadSafetyConfig]);
 
 	async function changeSafetyLevel(
 		nextSafetyLevel: SafetyLevel,
 	): Promise<void> {
+		const passcode =
+			nextSafetyLevel === "low" && safetyLevel !== "low"
+				? window.prompt(
+						"Enter your qcp-web passcode to confirm the safety downgrade.",
+					)
+				: undefined;
+		if (nextSafetyLevel === "low" && safetyLevel !== "low" && !passcode) {
+			return;
+		}
 		setSafetyLevel(nextSafetyLevel);
 		const response = await fetch("/api/qcp/safety", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ safetyLevel: nextSafetyLevel }),
+			body: JSON.stringify({ safetyLevel: nextSafetyLevel, passcode }),
 		});
 		if (!response.ok) {
 			setError("Could not update safety level.");
@@ -228,6 +237,10 @@ export function AssistantShell(): React.ReactElement {
 
 				<div className="section-title">Status</div>
 				<div className="status">
+					<p>
+						Low skips selected approvals only. Privacy, function, tenant, and
+						read-only protections remain enforced.
+					</p>
 					<div className="row">
 						<strong>Active database</strong>
 						<span>{activeConnection?.name ?? "not configured"}</span>

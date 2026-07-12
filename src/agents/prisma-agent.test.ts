@@ -108,7 +108,7 @@ describe("Prisma agent tools", () => {
 			tools,
 			"qcp_execute_read_sql",
 			{
-				sql: "SELECT * FROM users",
+				sql: "SELECT id, organization_id, user_id FROM users",
 			},
 			secureContext(),
 		);
@@ -167,7 +167,7 @@ describe("Prisma agent tools", () => {
 			tools,
 			"qcp_execute_read_sql",
 			{
-				sql: "SELECT * FROM users",
+				sql: "SELECT id, organization_id, user_id FROM users",
 			},
 			secureContext(),
 		);
@@ -234,12 +234,12 @@ describe("Prisma agent tools", () => {
 		const sensitive = await requiresApproval(
 			sensitiveTools,
 			"qcp_execute_read_sql",
-			{ sql: "SELECT * FROM users" },
+			{ sql: "SELECT id, organization_id, user_id FROM users" },
 		);
 		const highCost = await requiresApproval(
 			highCostTools,
 			"qcp_execute_read_sql",
-			{ sql: "SELECT * FROM users" },
+			{ sql: "SELECT id, organization_id, user_id FROM users" },
 		);
 
 		expect(sensitive).toBe(true);

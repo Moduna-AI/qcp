@@ -38,8 +38,16 @@ const WebAuthSchema = z.object({
 	passcodeHash: z.string().min(1),
 	passcodeSalt: z.string().min(1),
 	sessionTokenHash: z.string().optional(),
+	sessionExpiresAt: z.string().datetime().optional(),
 	createdAt: z.string(),
 	updatedAt: z.string(),
+});
+
+const PostgresPrivacyPolicySchema = z.object({
+	sensitiveColumns: z.array(z.string().min(1)).default([]),
+	allowedSensitiveViews: z.array(z.string().min(1)).default([]),
+	safeFunctions: z.array(z.string().min(1)).default([]),
+	minimumCohortSize: z.number().int().min(2).max(10_000).default(10),
 });
 
 export const DATABASE_TYPES = [
@@ -62,6 +70,12 @@ const DatabaseConnectionConfigSchema = z.object({
 	prismaDatasourceName: z.string().optional(),
 	createdAt: z.string().default(() => new Date().toISOString()),
 	updatedAt: z.string().default(() => new Date().toISOString()),
+	privacyPolicy: PostgresPrivacyPolicySchema.default({
+		sensitiveColumns: [],
+		allowedSensitiveViews: [],
+		safeFunctions: [],
+		minimumCohortSize: 10,
+	}),
 });
 
 const QcpConfigSchema = z.object({
@@ -254,6 +268,12 @@ function migrateLegacyDatabaseConnection(config: QcpConfig): QcpConfig {
 		prismaDatasourceName: config.prismaDatasourceName,
 		createdAt: now,
 		updatedAt: now,
+		privacyPolicy: {
+			sensitiveColumns: [],
+			allowedSensitiveViews: [],
+			safeFunctions: [],
+			minimumCohortSize: 10,
+		},
 	};
 
 	return {

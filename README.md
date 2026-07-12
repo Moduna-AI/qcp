@@ -304,9 +304,26 @@ Settings are stored in `~/.qcp/config.json`.
   "showSql": true,
   "showMetrics": false,
   "telemetry": true,
-  "sensitiveTablePatterns": ["user", "customer", "payment", "billing"]
+  "sensitiveTablePatterns": ["user", "customer", "payment", "billing"],
+  "databaseConnections": [{
+    "name": "analytics",
+    "privacyPolicy": {
+      "sensitiveColumns": ["public.customers.health_record"],
+      "allowedSensitiveViews": ["analytics.masked_customers"],
+      "safeFunctions": ["analytics.safe_bucket"],
+      "minimumCohortSize": 10
+    }
+  }]
 }
 ```
+
+PostgreSQL privacy policies are enforced per named connection at every safety
+level. Raw sensitive columns, unsafe or unknown functions, `EXPLAIN ANALYZE`,
+and locking reads are rejected. Prefer restricted database views, column
+privileges, forced RLS, masking, and encryption; qcp's policy is an additional
+application boundary, not a replacement for database permissions. Run
+`qcp doctor` or ask the agent to audit PostgreSQL privacy posture for read-only
+role and RLS findings.
 
 Environment variables:
 

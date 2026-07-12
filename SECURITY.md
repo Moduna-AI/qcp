@@ -60,6 +60,36 @@ Database tool outputs are scrubbed before they are returned to model-facing cont
 
 Scrubbing is a defense-in-depth layer. Do not use it as the only control for highly sensitive data; prefer least-privilege database roles, views, row-level security, and tenant-scoped credentials.
 
+### Sensitive columns and PostgreSQL functions
+
+qcp applies an enforced privacy policy to every shared agent SQL execution path, including when the safety level is `low`:
+
+- Column-name heuristics and per-connection classifications deny raw reads of sensitive fields.
+- `SELECT *` is rejected when a referenced table contains classified sensitive columns.
+- Sensitive aggregates require `HAVING COUNT(*) >= 10` by default; raw sensitive grouping keys remain prohibited.
+- Masked or projection views must be explicitly listed in the connection's `allowedSensitiveViews` policy.
+- PostgreSQL functions are fail-closed. Common deterministic analytical functions are built in, and reviewed functions can be added per connection with `safeFunctions`.
+- `EXPLAIN ANALYZE` and row-locking `SELECT` clauses are rejected.
+
+Per-connection privacy policy is stored with each named database connection:
+
+```json
+{
+  "privacyPolicy": {
+    "sensitiveColumns": ["public.customers.health_record"],
+    "allowedSensitiveViews": ["analytics.masked_customers"],
+    "safeFunctions": ["analytics.safe_bucket"],
+    "minimumCohortSize": 10
+  }
+}
+```
+
+Overrides expand access and should be reviewed like database grants. Existing connections migrate to the enforced defaults automatically.
+
+### PostgreSQL privacy posture audit
+
+The read-only `qcp_audit_postgres_privacy_posture` Mastra tool and `qcp doctor` inspect the active role for superuser or `BYPASSRLS` privileges and review table RLS posture. The audit returns recommendations only and never executes DDL. It complements, rather than replaces, database-side column grants, restricted views, `FORCE ROW LEVEL SECURITY`, masking or anonymization, encryption, and least-privilege credentials.
+
 ### Error hygiene
 
 Raw database errors are not returned to the agent unchanged. qcp suppresses stack traces, raw SQL, and schema-revealing database messages in model-facing tool responses.
@@ -130,6 +160,9 @@ qcp reduces risk; it does not make arbitrary database access risk-free.
 - Semantic annotations can be sent to the configured LLM provider when relevant to an ask/chat request.
 - Opt-in semantic value profiles are local summaries, but they may still reveal business-sensitive value names.
 - PII scrubbing is pattern-based and may not catch every sensitive value.
+- Sensitive-column classification is heuristic unless explicitly configured and can produce false positives or miss domain-specific identifiers.
+- Cohort enforcement recognizes the conservative `HAVING COUNT(*) >= N` form; unsupported privacy-preserving query shapes fail closed.
+- A function added to `safeFunctions` is trusted code from qcp's perspective and must be security-reviewed.
 - Tenant isolation currently supports conservative SQL shapes and rejects unsupported forms.
 - Database permissions remain the strongest boundary. Use least-privilege credentials.
 - If you disable safe mode or use `--yes`, you remove interactive approval, not deterministic validation.

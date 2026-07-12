@@ -30,6 +30,12 @@ describe("qcp-web API helpers", () => {
 			safetyConfigRequestSchema.parse({ safetyLevel: "low" }).safetyLevel,
 		).toBe("low");
 		expect(
+			safetyConfigRequestSchema.parse({
+				safetyLevel: "low",
+				passcode: " 1234 ",
+			}).passcode,
+		).toBe("1234");
+		expect(
 			approvalRequestSchema.parse({ runId: "run", toolCallId: "tool" }).runId,
 		).toBe("run");
 		expect(() => setupRequestSchema.parse({ passcode: "123" })).toThrow();

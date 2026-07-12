@@ -18,6 +18,7 @@ export interface DatabaseConnectionConfig {
 	prismaDatasourceName?: string;
 	createdAt: string;
 	updatedAt: string;
+	privacyPolicy?: PostgresPrivacyPolicy;
 }
 
 export interface ActiveDatabaseConnection {
@@ -39,6 +40,7 @@ export interface QcpWebAuthConfig {
 	passcodeHash: string;
 	passcodeSalt: string;
 	sessionTokenHash?: string;
+	sessionExpiresAt?: string;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -134,6 +136,41 @@ export interface SafetyReport {
 	warnings: string[];
 	processedSql: string;
 	statementType: string;
+	privacyFindings?: PrivacySafetyFinding[];
+}
+
+export type PrivacySafetyFindingType =
+	| "sensitive_column"
+	| "minimum_cohort"
+	| "unsafe_function"
+	| "unsafe_clause";
+
+export interface PrivacySafetyFinding {
+	type: PrivacySafetyFindingType;
+	detail: string;
+	object?: string;
+}
+
+export interface PostgresPrivacyPolicy {
+	sensitiveColumns: string[];
+	allowedSensitiveViews: string[];
+	safeFunctions: string[];
+	minimumCohortSize: number;
+}
+
+export type PostgresPrivacyPostureSeverity = "info" | "warning" | "critical";
+
+export interface PostgresPrivacyPostureFinding {
+	check: string;
+	severity: PostgresPrivacyPostureSeverity;
+	detail: string;
+	remediation: string;
+}
+
+export interface PostgresPrivacyPostureReport {
+	role: string;
+	findings: PostgresPrivacyPostureFinding[];
+	checkedAt: string;
 }
 
 export interface SecurityRequestContext {

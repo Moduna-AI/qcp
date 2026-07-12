@@ -32,6 +32,8 @@ import type {
 } from "../types/index.js";
 
 export * from "./policy.js";
+export * from "./postgres-posture.js";
+export * from "./privacy-policy.js";
 
 // ─── Statement allowlist ──────────────────────────────────────────────────────
 

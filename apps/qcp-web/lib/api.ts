@@ -23,6 +23,7 @@ export const chatRequestSchema = z.object({
 
 export const safetyConfigRequestSchema = z.object({
 	safetyLevel: safetyLevelSchema,
+	passcode: z.string().trim().min(1).optional(),
 });
 
 export const approvalRequestSchema = z.object({
