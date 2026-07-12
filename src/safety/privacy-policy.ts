@@ -38,42 +38,36 @@ const UNSAFE_CLAUSE_PATTERN =
 	/\bFOR\s+(?:UPDATE|NO\s+KEY\s+UPDATE|SHARE|KEY\s+SHARE)\b/i;
 const AGGREGATE_FUNCTIONS = new Set(["avg", "count", "max", "min", "sum"]);
 
-export interface PrivacyPolicyEvaluation {
+export function isSensitiveColumnName(name: string): boolean {
+	return SENSITIVE_COLUMN_PATTERN.test(name);
+}
+
+interface PrivacyPolicyEvaluation {
 	readonly safe: boolean;
 	readonly findings: PrivacySafetyFinding[];
 }
 
-export function defaultPostgresPrivacyPolicy(): PostgresPrivacyPolicy {
-	return {
-		sensitiveColumns: [],
-		allowedSensitiveViews: [],
-		safeFunctions: [],
-		minimumCohortSize: 10,
-	};
-}
+const DEFAULT_POLICY: PostgresPrivacyPolicy = {
+	sensitiveColumns: [],
+	allowedSensitiveViews: [],
+	safeFunctions: [],
+	minimumCohortSize: 10,
+};
 
 export function evaluatePostgresPrivacyPolicy(input: {
 	readonly sql: string;
 	readonly schema: DatabaseSchema;
 	readonly policy?: PostgresPrivacyPolicy;
 }): PrivacyPolicyEvaluation {
-	const policy = input.policy ?? defaultPostgresPrivacyPolicy();
+	const policy = input.policy ?? DEFAULT_POLICY;
 	const findings: PrivacySafetyFinding[] = [];
 	const lowerSql = input.sql.toLowerCase();
-	const configuredSensitiveNames = [
-		...policy.sensitiveColumns.map(normalizeObjectName),
-		...input.schema.tables.flatMap((table) =>
-			table.columns
-				.filter((column) => SENSITIVE_COLUMN_PATTERN.test(column.name))
-				.map((column) => column.name.toLowerCase()),
-		),
-	];
-	const explicitlyTrustedView = policy.allowedSensitiveViews.some((view) =>
-		lowerSql.includes(view.toLowerCase()),
-	);
+	const sensitive = sensitiveColumnNames(input.schema, policy);
 	if (
-		!explicitlyTrustedView &&
-		configuredSensitiveNames.some((column) => lowerSql.includes(column)) &&
+		!policy.allowedSensitiveViews.some((view) =>
+			lowerSql.includes(view.toLowerCase()),
+		) &&
+		[...sensitive].some((column) => lowerSql.includes(column)) &&
 		/\b(?:avg|count|max|min|sum)\s*\(/i.test(input.sql) &&
 		!hasMinimumCohort(input.sql, policy.minimumCohortSize)
 	) {
@@ -107,7 +101,7 @@ export function evaluatePostgresPrivacyPolicy(input: {
 		return { safe: findings.length === 0, findings };
 	}
 
-	const functions = collectAstNames(ast, "call");
+	const functions = collectAstNames(ast);
 	const safeFunctions = new Set([
 		...DEFAULT_SAFE_FUNCTIONS,
 		...policy.safeFunctions.map(normalizeObjectName),
@@ -123,7 +117,6 @@ export function evaluatePostgresPrivacyPolicy(input: {
 		}
 	}
 
-	const sensitive = sensitiveColumnNames(input.schema, policy);
 	const trustedViews = new Set(
 		policy.allowedSensitiveViews.map(normalizeObjectName),
 	);
@@ -141,21 +134,9 @@ export function evaluatePostgresPrivacyPolicy(input: {
 		referencedTables.every((table) =>
 			trustedViews.has(normalizeObjectName(table)),
 		);
-	const sensitiveUsage = onlyTrustedViews
-		? { raw: [], aggregate: [] }
-		: collectSensitiveUsage(ast, sensitive);
-	const sensitiveReferencedColumns = [...referencedColumns].filter((column) =>
-		sensitive.has(normalizeObjectName(column)),
-	);
-	const aggregateSensitiveColumns =
-		sensitiveUsage.aggregate.length > 0
-			? sensitiveUsage.aggregate
-			: sensitiveUsage.raw.length === 0 &&
-					[...functions].some((fn) =>
-						AGGREGATE_FUNCTIONS.has(normalizeObjectName(fn)),
-					)
-				? sensitiveReferencedColumns
-				: [];
+	const rawSensitiveColumns = onlyTrustedViews
+		? []
+		: collectRawSensitiveColumns(ast, sensitive);
 	if (hasSensitiveWildcard) {
 		findings.push({
 			type: "sensitive_column",
@@ -165,23 +146,14 @@ export function evaluatePostgresPrivacyPolicy(input: {
 		});
 	}
 
-	if (sensitiveUsage.raw.length > 0) {
-		for (const column of sensitiveUsage.raw) {
+	if (rawSensitiveColumns.length > 0) {
+		for (const column of rawSensitiveColumns) {
 			findings.push({
 				type: "sensitive_column",
 				detail: `Raw access to sensitive column '${column}' is not permitted. Use an approved masked view or a cohort-protected aggregate.`,
 				object: column,
 			});
 		}
-	} else if (
-		aggregateSensitiveColumns.length > 0 &&
-		!isCohortProtected(input.sql, policy.minimumCohortSize, functions)
-	) {
-		findings.push({
-			type: "minimum_cohort",
-			detail: `Sensitive aggregates require HAVING COUNT(*) >= ${policy.minimumCohortSize}.`,
-			object: String(policy.minimumCohortSize),
-		});
 	}
 
 	return { safe: findings.length === 0, findings };
@@ -221,7 +193,7 @@ function sensitiveColumnNames(
 	const result = new Set(policy.sensitiveColumns.map(normalizeObjectName));
 	for (const table of schema.tables) {
 		for (const column of table.columns) {
-			if (SENSITIVE_COLUMN_PATTERN.test(column.name))
+			if (isSensitiveColumnName(column.name))
 				result.add(column.name.toLowerCase());
 		}
 	}
@@ -241,24 +213,11 @@ function tableHasSensitiveColumn(
 	);
 }
 
-function isCohortProtected(
-	sql: string,
-	minimum: number,
-	functions: Set<string>,
-): boolean {
-	return (
-		[...functions].some((fn) =>
-			AGGREGATE_FUNCTIONS.has(normalizeObjectName(fn)),
-		) && hasMinimumCohort(sql, minimum)
-	);
-}
-
-function collectSensitiveUsage(
+function collectRawSensitiveColumns(
 	value: unknown,
 	sensitive: Set<string>,
-): { raw: string[]; aggregate: string[] } {
+): string[] {
 	const raw = new Set<string>();
-	const aggregate = new Set<string>();
 	const visit = (node: unknown, insideAggregate: boolean): void => {
 		if (Array.isArray(node)) {
 			for (const item of node) visit(item, insideAggregate);
@@ -269,22 +228,20 @@ function collectSensitiveUsage(
 			node.type === "call" &&
 			isRecord(node.function) &&
 			typeof node.function.name === "string"
-				? normalizeObjectName(node.function.name)
-				: undefined;
-		const nestedAggregate =
-			insideAggregate || (fn !== undefined && AGGREGATE_FUNCTIONS.has(fn));
+				? AGGREGATE_FUNCTIONS.has(normalizeObjectName(node.function.name))
+				: false;
+		const nestedAggregate = insideAggregate || fn;
 		if (
 			node.type === "ref" &&
 			typeof node.name === "string" &&
 			sensitive.has(normalizeObjectName(node.name))
 		) {
-			if (insideAggregate) aggregate.add(node.name);
-			else raw.add(node.name);
+			if (!insideAggregate) raw.add(node.name);
 		}
 		for (const child of Object.values(node)) visit(child, nestedAggregate);
 	};
 	visit(value, false);
-	return { raw: [...raw], aggregate: [...aggregate] };
+	return [...raw];
 }
 
 function hasMinimumCohort(sql: string, minimum: number): boolean {
@@ -292,10 +249,10 @@ function hasMinimumCohort(sql: string, minimum: number): boolean {
 	return match?.[1] !== undefined && Number(match[1]) >= minimum;
 }
 
-function collectAstNames(value: unknown, nodeType: string): Set<string> {
+function collectAstNames(value: unknown): Set<string> {
 	const result = new Set<string>();
 	walk(value, (record) => {
-		if (record.type !== nodeType) return;
+		if (record.type !== "call") return;
 		const fn = record.function;
 		if (isRecord(fn) && typeof fn.name === "string") result.add(fn.name);
 		if (typeof fn === "string") result.add(fn);
@@ -323,7 +280,6 @@ function collectReferencedColumns(value: unknown): Set<string> {
 	walk(value, (record) => {
 		if (record.type === "ref" && typeof record.name === "string")
 			result.add(record.name);
-		if (record.type === "ref" && record.name === "*") result.add("*");
 	});
 	return result;
 }

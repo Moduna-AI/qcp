@@ -5,6 +5,7 @@ import type {
 	PostgresPrivacyPostureReport,
 	QueryResult,
 } from "@/types/index.js";
+import { isSensitiveColumnName } from "./privacy-policy.js";
 
 type PostgresPostureQueryExecutor = (
 	databaseUrl: string,
@@ -44,25 +45,29 @@ export async function auditPostgresPrivacyPosture(input: {
 	const row = result.rows[0] ?? {};
 	const role = typeof row.role_name === "string" ? row.role_name : "unknown";
 	const findings: PostgresPrivacyPostureFinding[] = [];
+	const addFinding = (
+		check: string,
+		severity: PostgresPrivacyPostureFinding["severity"],
+		detail: string,
+		remediation: string,
+	): void => {
+		findings.push({ check, severity, detail, remediation });
+	};
 
 	if (row.rolsuper === true) {
-		findings.push(
-			finding(
-				"Role privileges",
-				"critical",
-				"The qcp database role is a PostgreSQL superuser.",
-				"Use a dedicated least-privilege role with SELECT access only.",
-			),
+		addFinding(
+			"Role privileges",
+			"critical",
+			"The qcp database role is a PostgreSQL superuser.",
+			"Use a dedicated least-privilege role with SELECT access only.",
 		);
 	}
 	if (row.rolbypassrls === true) {
-		findings.push(
-			finding(
-				"Row-level security",
-				"critical",
-				"The qcp database role can bypass row-level security.",
-				"Remove BYPASSRLS and use FORCE ROW LEVEL SECURITY where table owners must also be scoped.",
-			),
+		addFinding(
+			"Row-level security",
+			"critical",
+			"The qcp database role can bypass row-level security.",
+			"Remove BYPASSRLS and use FORCE ROW LEVEL SECURITY where table owners must also be scoped.",
 		);
 	}
 
@@ -82,56 +87,39 @@ export async function auditPostgresPrivacyPosture(input: {
 				`${relation.schema}.${relation.table}`.toLowerCase(),
 		);
 		if (exposedColumns.length > 0 && !trustedView) {
-			findings.push(
-				finding(
-					"Sensitive column privileges",
-					"critical",
-					`${relation.schema}.${relation.table} grants the qcp role SELECT on classified sensitive columns: ${exposedColumns.join(", ")}.`,
-					"Revoke raw column access and grant SELECT on a reviewed masked or projection view instead.",
-				),
+			addFinding(
+				"Sensitive column privileges",
+				"critical",
+				`${relation.schema}.${relation.table} grants the qcp role SELECT on classified sensitive columns: ${exposedColumns.join(", ")}.`,
+				"Revoke raw column access and grant SELECT on a reviewed masked or projection view instead.",
 			);
 		}
 		if ((relation.kind === "r" || relation.kind === "p") && !relation.rls) {
-			findings.push(
-				finding(
-					"Row-level security",
-					"warning",
-					`${relation.schema}.${relation.table} does not enable RLS.`,
-					"Enable and test RLS for multi-tenant or user-scoped data.",
-				),
+			addFinding(
+				"Row-level security",
+				"warning",
+				`${relation.schema}.${relation.table} does not enable RLS.`,
+				"Enable and test RLS for multi-tenant or user-scoped data.",
 			);
 		} else if (relation.rls && !relation.forceRls && relation.owner === role) {
-			findings.push(
-				finding(
-					"Forced row-level security",
-					"warning",
-					`${relation.schema}.${relation.table} is owned by the qcp role without FORCE RLS.`,
-					"Use a non-owner reader role or enable FORCE ROW LEVEL SECURITY.",
-				),
+			addFinding(
+				"Forced row-level security",
+				"warning",
+				`${relation.schema}.${relation.table} is owned by the qcp role without FORCE RLS.`,
+				"Use a non-owner reader role or enable FORCE ROW LEVEL SECURITY.",
 			);
 		}
 	}
 
 	if (findings.length === 0) {
-		findings.push(
-			finding(
-				"Privacy posture",
-				"info",
-				"No high-confidence role or RLS issues were detected.",
-				"Continue using restricted views, column grants, masking, encryption, and periodic privilege review.",
-			),
+		addFinding(
+			"Privacy posture",
+			"info",
+			"No high-confidence role or RLS issues were detected.",
+			"Continue using restricted views, column grants, masking, encryption, and periodic privilege review.",
 		);
 	}
 	return { role, findings, checkedAt: new Date().toISOString() };
-}
-
-function finding(
-	check: string,
-	severity: PostgresPrivacyPostureFinding["severity"],
-	detail: string,
-	remediation: string,
-): PostgresPrivacyPostureFinding {
-	return { check, severity, detail, remediation };
 }
 
 interface RelationPosture {
@@ -145,17 +133,14 @@ interface RelationPosture {
 }
 
 function parseRelations(value: unknown): RelationPosture[] {
-	const parsed = typeof value === "string" ? safeJsonParse(value) : value;
-	if (!Array.isArray(parsed)) return [];
-	return parsed.flatMap((item) => (isRelationPosture(item) ? [item] : []));
-}
-
-function safeJsonParse(value: string): unknown {
+	let parsed = value;
 	try {
-		return JSON.parse(value);
+		if (typeof value === "string") parsed = JSON.parse(value);
 	} catch {
 		return [];
 	}
+	if (!Array.isArray(parsed)) return [];
+	return parsed.flatMap((item) => (isRelationPosture(item) ? [item] : []));
 }
 
 function isRelationPosture(value: unknown): value is RelationPosture {
@@ -191,11 +176,7 @@ function classifiedSensitiveColumns(
 			candidate.name.toLowerCase() === tableName.toLowerCase(),
 	);
 	for (const column of table?.columns ?? []) {
-		if (
-			/(?:^|_)(?:address|api_?key|birth|card|credential|dob|email|health|medical|password|phone|secret|ssn|social_security|token)(?:$|_)/i.test(
-				column.name,
-			)
-		) {
+		if (isSensitiveColumnName(column.name)) {
 			result.add(column.name.toLowerCase());
 		}
 	}

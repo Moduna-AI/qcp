@@ -15,8 +15,9 @@ qcp treats all LLM output as untrusted. The model can propose SQL, but determini
 qcp enforces read-only behavior in multiple layers:
 
 - SQL is parsed with `pgsql-ast-parser` and validated structurally before execution.
-- Only `SELECT`, safe `WITH`, and `EXPLAIN` statements are allowed.
-- Data-changing statements such as `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`, `CREATE`, `GRANT`, `REVOKE`, and `COPY` are rejected.
+- The command policy targets PostgreSQL 18; only `SELECT`, safe `WITH`, and non-executing `EXPLAIN` statements are allowed.
+- Every other PostgreSQL 18 command family is rejected, including data/schema changes, privilege and session changes, maintenance, transaction control, cursors, prepared statements, notifications, file/library access, and foreign-schema imports.
+- `SELECT INTO`, row-locking `SELECT`, and `EXPLAIN ANALYZE` are rejected even though they resemble read or planning operations.
 - Multiple statements are rejected.
 - Data-changing CTEs are rejected, even when hidden inside a top-level `WITH`.
 - Database reads run inside PostgreSQL read-only transactions.

@@ -182,11 +182,14 @@ deterministic code decides whether that SQL is allowed to run.
 ### SQL Validation
 
 Every generated statement is parsed into an AST before execution.
+The command policy targets PostgreSQL 18.
 
 **Allowed**: `SELECT`, `WITH`, `EXPLAIN`
 
-**Rejected**: `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `TRUNCATE`,
-`CREATE`, `GRANT`, `REVOKE`, `COPY`
+**Rejected**: every other PostgreSQL 18 command family, including data/schema
+changes, role and session changes, maintenance commands, cursor/prepared
+statement commands, notifications, file/library access, and transaction control.
+`SELECT INTO`, row-locking `SELECT`, and `EXPLAIN ANALYZE` are also rejected.
 
 `WITH` queries are inspected internally, so data-changing CTEs such as
 `WITH deleted AS (DELETE ...) SELECT ...` are rejected.
