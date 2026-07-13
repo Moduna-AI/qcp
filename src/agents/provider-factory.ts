@@ -48,10 +48,16 @@ export async function createProviderDatabaseAgent(
 ): Promise<ProviderDatabaseAgent> {
 	const model = createMastraModelConfig(options.config);
 	const semanticTools = await createProviderSemanticTools(options);
+	const privacyPolicy = options.config.databaseConnections.find(
+		(connection) =>
+			connection.id ===
+			(options.connectionId ?? options.config.activeDatabaseId),
+	)?.privacyPolicy;
 	const tools = {
 		...createDatabaseTools({
 			databaseUrl: options.databaseUrl,
 			schema: options.schema,
+			privacyPolicy,
 			sensitiveTablePatterns: options.config.sensitiveTablePatterns,
 			approvalHandler: options.approvalHandler,
 			safetyLevel: options.config.safetyLevel,

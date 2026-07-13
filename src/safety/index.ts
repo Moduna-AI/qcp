@@ -32,10 +32,68 @@ import type {
 } from "../types/index.js";
 
 export * from "./policy.js";
+export * from "./postgres-posture.js";
+export * from "./privacy-policy.js";
 
 // ─── Statement allowlist ──────────────────────────────────────────────────────
 
 const ALLOWED_STATEMENT_TYPES = new Set(["select", "with"]);
+
+export const SUPPORTED_POSTGRESQL_MAJOR_VERSION = 18;
+
+// PostgreSQL 18 commands outside qcp's read-query surface. Multi-word
+// commands are covered by their first keyword and AST validation remains the
+// final authority for SELECT/WITH bodies.
+const POSTGRESQL_18_BLOCKED_COMMANDS = new Set([
+	"ABORT",
+	"ALTER",
+	"ANALYZE",
+	"BEGIN",
+	"CALL",
+	"CHECKPOINT",
+	"CLOSE",
+	"CLUSTER",
+	"COMMENT",
+	"COMMIT",
+	"COPY",
+	"CREATE",
+	"DEALLOCATE",
+	"DECLARE",
+	"DELETE",
+	"DISCARD",
+	"DO",
+	"DROP",
+	"END",
+	"EXECUTE",
+	"FETCH",
+	"GRANT",
+	"IMPORT",
+	"INSERT",
+	"LISTEN",
+	"LOAD",
+	"LOCK",
+	"MERGE",
+	"MOVE",
+	"NOTIFY",
+	"PREPARE",
+	"REASSIGN",
+	"REFRESH",
+	"REINDEX",
+	"RELEASE",
+	"RESET",
+	"REVOKE",
+	"ROLLBACK",
+	"SAVEPOINT",
+	"SECURITY",
+	"SET",
+	"SHOW",
+	"START",
+	"TRUNCATE",
+	"UNLISTEN",
+	"UPDATE",
+	"VACUUM",
+	"VALUES",
+]);
 
 // ─── Known dangerous types for better error messages ──────────────────────────
 
@@ -143,14 +201,8 @@ export function classifyPromptViolation(
 // and validate the inner SELECT via AST.
 
 const EXPLAIN_REGEX = /^\s*EXPLAIN\s*(\([^)]*\))?\s*/i;
-
-function isExplainStatement(sql: string): boolean {
-	return EXPLAIN_REGEX.test(sql);
-}
-
-function stripExplainPrefix(sql: string): string {
-	return sql.replace(EXPLAIN_REGEX, "").trim();
-}
+const EXPLAIN_ANALYZE_REGEX =
+	/^\s*EXPLAIN\s*(?:\([^)]*\bANALYZE\b[^)]*\)|ANALYZE\b)/i;
 
 // ─── Main validation ──────────────────────────────────────────────────────────
 
@@ -173,24 +225,7 @@ export function validateSql(sql: string): SafetyReport {
 	}
 	const firstKeyword = trimmedSql.match(/^\s*([a-zA-Z]+)/)?.[1]?.toUpperCase();
 
-	const blockedKeywords = new Set([
-		"INSERT",
-		"UPDATE",
-		"DELETE",
-		"DROP",
-		"ALTER",
-		"CREATE",
-		"TRUNCATE",
-		"REPLACE",
-		"MERGE",
-		"CALL",
-		"EXEC",
-		"EXECUTE",
-		"GRANT",
-		"REVOKE",
-	]);
-
-	if (firstKeyword && blockedKeywords.has(firstKeyword)) {
+	if (firstKeyword && POSTGRESQL_18_BLOCKED_COMMANDS.has(firstKeyword)) {
 		report.statementType = firstKeyword.toLowerCase();
 		report.errors.push(
 			`Dangerous operation rejected: ${firstKeyword} is not permitted. ` +
@@ -198,10 +233,17 @@ export function validateSql(sql: string): SafetyReport {
 		);
 		return report;
 	}
+	if (EXPLAIN_ANALYZE_REGEX.test(trimmedSql)) {
+		report.statementType = "explain";
+		report.errors.push(
+			"EXPLAIN ANALYZE is not permitted because it executes the statement.",
+		);
+		return report;
+	}
 
 	// ── Handle EXPLAIN ─────────────────────────────────────────────────────────
-	if (isExplainStatement(trimmedSql)) {
-		const innerSql = stripExplainPrefix(trimmedSql);
+	if (EXPLAIN_REGEX.test(trimmedSql)) {
+		const innerSql = trimmedSql.replace(EXPLAIN_REGEX, "").trim();
 		if (!innerSql) {
 			report.errors.push("EXPLAIN requires a query.");
 			return report;
@@ -321,17 +363,18 @@ function statementHasLimit(stmt: Statement): boolean {
 }
 
 function extractLimitValue(stmt: Statement): number | null {
-	try {
-		const s = stmt as unknown as { limit?: { limit?: { value?: unknown } } };
-		const v = s.limit?.limit?.value;
-		return typeof v === "number" ? v : null;
-	} catch {
-		return null;
-	}
+	const value = (stmt as { limit?: { limit?: { value?: unknown } } }).limit
+		?.limit?.value;
+	return typeof value === "number" ? value : null;
 }
 
 function findNonReadOnlyStatement(stmt: Statement): string | null {
-	if (stmt.type === "select" || stmt.type === "values") return null;
+	if (stmt.type === "select") {
+		return (stmt as SelectFromStatement).for
+			? "SELECT row-locking clause"
+			: null;
+	}
+	if (stmt.type === "values") return null;
 	if (stmt.type === "union" || stmt.type === "union all") {
 		return (
 			findNonReadOnlyStatement(stmt.left) ??

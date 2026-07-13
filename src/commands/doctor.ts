@@ -10,7 +10,7 @@ import {
 	loadConfig,
 	redactConfig,
 } from "@/config/index.js";
-import { testConnection } from "@/db/index.js";
+import { executeQuery, testConnection } from "@/db/index.js";
 import { createProvider } from "@/llm/index.js";
 import {
 	printDoctorCheck,
@@ -20,6 +20,7 @@ import {
 } from "@/output/index.js";
 import { importPackageFromStore } from "@/packages/lazy-packages.js";
 import { ensurePackageGroups } from "@/packages/runtime.js";
+import { auditPostgresPrivacyPosture } from "@/safety/index.js";
 import {
 	loadSchemaForConnection,
 	schemaCatalogHasConnection,
@@ -112,6 +113,19 @@ async function checkDatabase(
 	}
 
 	const checks: DoctorCheck[] = [];
+	const configuredConnection = config.databaseConnections.find(
+		(candidate) => candidate.id === connection.id,
+	);
+	let schemaForAudit:
+		| ReturnType<typeof loadSchemaForConnection>["schema"]
+		| undefined;
+	if (schemaCatalogHasConnection(connection.id)) {
+		try {
+			schemaForAudit = loadSchemaForConnection(connection).schema;
+		} catch {
+			schemaForAudit = undefined;
+		}
+	}
 	checks.push({
 		name: "Active connection",
 		status: "healthy",
@@ -126,6 +140,32 @@ async function checkDatabase(
 			status: "healthy",
 			value: result.version,
 		});
+		try {
+			const posture = await auditPostgresPrivacyPosture({
+				databaseUrl: connection.databaseUrl,
+				queryExecutor: executeQuery,
+				schema: schemaForAudit,
+				privacyPolicy: configuredConnection?.privacyPolicy,
+			});
+			const critical = posture.findings.filter(
+				(finding) => finding.severity === "critical",
+			).length;
+			const warnings = posture.findings.filter(
+				(finding) => finding.severity === "warning",
+			).length;
+			checks.push({
+				name: "PostgreSQL privacy posture",
+				status: critical > 0 ? "error" : warnings > 0 ? "warning" : "healthy",
+				value: `${critical} critical, ${warnings} warning findings`,
+				message: posture.findings[0]?.detail,
+			});
+		} catch {
+			checks.push({
+				name: "PostgreSQL privacy posture",
+				status: "warning",
+				message: "Unable to inspect role and RLS catalog metadata.",
+			});
+		}
 		checks.push({
 			name: "Read-only enforcement",
 			status: "healthy",

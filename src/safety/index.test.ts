@@ -3,6 +3,7 @@ import type { DatabaseSchema } from "@/types/index.js";
 import {
 	classifyPromptViolation,
 	enforceTenantIsolation,
+	SUPPORTED_POSTGRESQL_MAJOR_VERSION,
 	sanitizeDatabaseError,
 	sanitizeSensitiveData,
 	validateSql,
@@ -43,6 +44,74 @@ const context = {
 };
 
 describe("SQL safety", () => {
+	test("targets PostgreSQL 18 and rejects its non-query command families", () => {
+		expect(SUPPORTED_POSTGRESQL_MAJOR_VERSION).toBe(18);
+		for (const sql of [
+			"ABORT",
+			"ALTER SYSTEM RESET ALL",
+			"ANALYZE users",
+			"BEGIN",
+			"CALL refresh_data()",
+			"CHECKPOINT",
+			"CLOSE cursor_name",
+			"CLUSTER users",
+			"COMMENT ON TABLE users IS 'x'",
+			"COMMIT",
+			"COPY users TO STDOUT",
+			"CREATE TABLE copied(id integer)",
+			"DEALLOCATE ALL",
+			"DECLARE c CURSOR FOR SELECT 1",
+			"DELETE FROM users",
+			"DISCARD ALL",
+			"DO $$ BEGIN END $$",
+			"DROP TABLE users",
+			"END",
+			"EXECUTE prepared_query",
+			"FETCH ALL FROM cursor_name",
+			"GRANT SELECT ON users TO reader",
+			"IMPORT FOREIGN SCHEMA public FROM SERVER remote INTO public",
+			"INSERT INTO users DEFAULT VALUES",
+			"LISTEN updates",
+			"LOAD 'library'",
+			"LOCK TABLE users",
+			"MERGE INTO users USING source ON false WHEN NOT MATCHED THEN DO NOTHING",
+			"MOVE ALL FROM cursor_name",
+			"NOTIFY updates",
+			"PREPARE query AS SELECT 1",
+			"REASSIGN OWNED BY old_role TO new_role",
+			"REFRESH MATERIALIZED VIEW report",
+			"REINDEX TABLE users",
+			"RELEASE SAVEPOINT checkpoint",
+			"RESET ROLE",
+			"REVOKE SELECT ON users FROM reader",
+			"ROLLBACK",
+			"SAVEPOINT checkpoint",
+			"SECURITY LABEL ON TABLE users IS 'x'",
+			"SET ROLE admin",
+			"SHOW search_path",
+			"START TRANSACTION",
+			"TRUNCATE users",
+			"UNLISTEN updates",
+			"UPDATE users SET name = 'x'",
+			"VACUUM users",
+			"VALUES (1)",
+		]) {
+			expect(validateSql(sql).safe).toBe(false);
+		}
+	});
+
+	test("rejects PostgreSQL read-looking commands that can execute or lock", () => {
+		for (const sql of [
+			"EXPLAIN ANALYZE SELECT id FROM users",
+			"EXPLAIN (ANALYZE false) SELECT id FROM users",
+			"SELECT * FROM users FOR UPDATE",
+			"SELECT * FROM users FOR SHARE",
+			"SELECT * INTO copied_users FROM users",
+		]) {
+			expect(validateSql(sql).safe).toBe(false);
+		}
+	});
+
 	test("categorizes prompt-level policy violations", () => {
 		expect(classifyPromptViolation("Drop the users table")?.category).toBe(
 			"safety",
