@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import "dotenv/config";
@@ -38,8 +44,16 @@ const WebAuthSchema = z.object({
 	passcodeHash: z.string().min(1),
 	passcodeSalt: z.string().min(1),
 	sessionTokenHash: z.string().optional(),
+	sessionExpiresAt: z.string().datetime().optional(),
 	createdAt: z.string(),
 	updatedAt: z.string(),
+});
+
+const PostgresPrivacyPolicySchema = z.object({
+	sensitiveColumns: z.array(z.string().min(1)).default([]),
+	allowedSensitiveViews: z.array(z.string().min(1)).default([]),
+	safeFunctions: z.array(z.string().min(1)).default([]),
+	minimumCohortSize: z.number().int().min(2).max(10_000).default(10),
 });
 
 export const DATABASE_TYPES = [
@@ -62,6 +76,12 @@ const DatabaseConnectionConfigSchema = z.object({
 	prismaDatasourceName: z.string().optional(),
 	createdAt: z.string().default(() => new Date().toISOString()),
 	updatedAt: z.string().default(() => new Date().toISOString()),
+	privacyPolicy: PostgresPrivacyPolicySchema.default({
+		sensitiveColumns: [],
+		allowedSensitiveViews: [],
+		safeFunctions: [],
+		minimumCohortSize: 10,
+	}),
 });
 
 const QcpConfigSchema = z.object({
@@ -135,7 +155,7 @@ export const AVAILABLE_MODELS: Record<ProviderName, string[]> = {
 
 export function ensureConfigDir(): void {
 	if (!existsSync(QCP_HOME)) {
-		mkdirSync(QCP_HOME, { recursive: true });
+		mkdirSync(QCP_HOME, { recursive: true, mode: 0o700 });
 	}
 	if (!existsSync(LOGS_DIR)) {
 		mkdirSync(LOGS_DIR, { recursive: true });
@@ -173,11 +193,36 @@ export function loadConfig(): QcpConfig {
 
 export function saveConfig(config: Partial<QcpConfig>): QcpConfig {
 	ensureConfigDir();
+	warnIfPermissionsCannotBeRestricted(QCP_HOME, 0o700);
 	const current = configExists() ? loadConfig() : createDefaultConfig();
 	const merged = { ...current, ...config };
 	const validated = normalizeConfig(QcpConfigSchema.parse(merged) as QcpConfig);
-	writeFileSync(CONFIG_PATH, JSON.stringify(validated, null, 2));
+	writeFileSync(CONFIG_PATH, JSON.stringify(validated, null, 2), {
+		mode: 0o600,
+	});
+	warnIfPermissionsCannotBeRestricted(CONFIG_PATH, 0o600);
 	return validated;
+}
+
+export function enforceOwnerOnlyPermissions(
+	path: string,
+	mode: number,
+): boolean {
+	if (process.platform === "win32") return true;
+	try {
+		chmodSync(path, mode);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function warnIfPermissionsCannotBeRestricted(path: string, mode: number): void {
+	if (!enforceOwnerOnlyPermissions(path, mode)) {
+		console.warn(
+			`Could not restrict permissions on ${path}. Database credentials may be readable by other users.`,
+		);
+	}
 }
 
 export function createDefaultConfig(): QcpConfig {
@@ -254,6 +299,12 @@ function migrateLegacyDatabaseConnection(config: QcpConfig): QcpConfig {
 		prismaDatasourceName: config.prismaDatasourceName,
 		createdAt: now,
 		updatedAt: now,
+		privacyPolicy: {
+			sensitiveColumns: [],
+			allowedSensitiveViews: [],
+			safeFunctions: [],
+			minimumCohortSize: 10,
+		},
 	};
 
 	return {

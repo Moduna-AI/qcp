@@ -17,6 +17,7 @@ import {
 	loadConfig,
 	withActiveDatabaseConnection,
 } from "@/config/index.js";
+import { PostgresConnectionValidator } from "@/config/postgres-connection-validator.js";
 import { testConnection } from "@/db/index.js";
 import {
 	printError,
@@ -152,6 +153,7 @@ export async function connectCommand(
 	}
 
 	spinner.succeed(`Connected to ${result.databaseVersion}`);
+	printConnectionWarnings(result.connectionWarnings);
 	printReadOnlyStatus(result.readOnly);
 	printSchemaStatus(result.connection.name, result.schema);
 	printSuccess("Database connection saved");
@@ -409,12 +411,14 @@ export function printConnectionGuidance(databaseType: DatabaseType): void {
 }
 
 export function validateDatabaseUrl(input: string): true | string {
-	const value = input.trim();
-	if (!value) return "Database URL cannot be empty";
-	if (!/^postgres(ql)?:\/\//i.test(value)) {
-		return "Use a PostgreSQL URL that starts with postgres:// or postgresql://";
+	try {
+		new PostgresConnectionValidator().validate(input);
+		return true;
+	} catch (err: unknown) {
+		return err instanceof Error
+			? err.message
+			: "Invalid PostgreSQL connection URI.";
 	}
-	return true;
 }
 
 export function validateConnectionName(input: string): true | string {
@@ -459,7 +463,7 @@ export function printReadOnlyStatus(readOnly: boolean): void {
 	}
 
 	printWarning(
-		"The connected user has write permissions. qcp enforces read-only at the " +
+		"Best-effort privilege inspection found write permissions. qcp enforces read-only at the " +
 			"SQL level, but for maximum safety, consider creating a dedicated read-only role:\n\n" +
 			chalk.dim("  CREATE ROLE qcp_readonly;\n") +
 			chalk.dim("  GRANT CONNECT ON DATABASE mydb TO qcp_readonly;\n") +
@@ -471,6 +475,16 @@ export function printReadOnlyStatus(readOnly: boolean): void {
 				"  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO qcp_readonly;",
 			),
 	);
+}
+
+export function printConnectionWarnings(
+	warnings: readonly "tls-not-required"[],
+): void {
+	if (warnings.includes("tls-not-required")) {
+		printWarning(
+			"TLS is not explicitly required for this remote database. Add sslmode=require (or verify-full) to the connection URI.",
+		);
+	}
 }
 
 export function printSchemaStatus(

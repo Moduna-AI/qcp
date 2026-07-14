@@ -28,6 +28,11 @@ import {
 	loadConfig,
 	saveConfig,
 } from "./index.js";
+import {
+	type ConnectionSecurityWarning,
+	PostgresConnectionValidator,
+	sanitizeConnectionError,
+} from "./postgres-connection-validator.js";
 
 export interface AddDatabaseConnectionInput {
 	readonly name: string;
@@ -69,6 +74,7 @@ export type DatabaseConnectionManagerResult =
 			readonly connection: ActiveDatabaseConnection;
 			readonly databaseVersion: string;
 			readonly readOnly: boolean;
+			readonly connectionWarnings: readonly ConnectionSecurityWarning[];
 			readonly schema: SchemaRefreshResult;
 	  }
 	| {
@@ -111,6 +117,7 @@ export interface DatabaseConnectionManagerDependencies {
 
 export class DatabaseConnectionManager {
 	private readonly dependencies: DatabaseConnectionManagerDependencies;
+	private readonly validator = new PostgresConnectionValidator();
 
 	public constructor(
 		dependencies: DatabaseConnectionManagerDependencies = {
@@ -135,13 +142,14 @@ export class DatabaseConnectionManager {
 			"connect",
 			input.name,
 			() => {
+				const validated = this.validator.validate(input.databaseUrl);
 				const config = this.dependencies.loadConfig();
 				const registry = new DatabaseConnectionRegistry(config);
 				const snapshot = registry.upsert(
 					{
 						name: input.name,
 						databaseType: input.databaseType,
-						databaseUrl: input.databaseUrl,
+						databaseUrl: validated.databaseUrl,
 						prismaSchemaPath:
 							input.databaseType === "prisma-postgres"
 								? input.prismaSchemaPath
@@ -154,7 +162,12 @@ export class DatabaseConnectionManager {
 					{ setActive: true },
 				);
 
-				return this.buildPendingConnection(config, snapshot, input.name);
+				return this.buildPendingConnection(
+					config,
+					snapshot,
+					input.name,
+					validated.warnings,
+				);
 			},
 		);
 	}
@@ -167,12 +180,15 @@ export class DatabaseConnectionManager {
 			"db edit",
 			input.name ?? input.alias,
 			() => {
+				const validated = input.databaseUrl
+					? this.validator.validate(input.databaseUrl)
+					: undefined;
 				const config = this.dependencies.loadConfig();
 				const registry = new DatabaseConnectionRegistry(config);
 				const snapshot = registry.update(input.alias, {
 					name: input.name,
 					databaseType: input.databaseType,
-					databaseUrl: input.databaseUrl,
+					databaseUrl: validated?.databaseUrl,
 					prismaSchemaPath: input.prismaSchemaPath,
 					prismaDatasourceName: input.prismaDatasourceName,
 				});
@@ -181,6 +197,7 @@ export class DatabaseConnectionManager {
 					config,
 					snapshot,
 					input.name ?? input.alias,
+					validated?.warnings ?? [],
 				);
 			},
 		);
@@ -249,7 +266,7 @@ export class DatabaseConnectionManager {
 		try {
 			pending = createPending();
 		} catch (err: unknown) {
-			const message = err instanceof Error ? err.message : String(err);
+			const message = sanitizeConnectionError(err);
 			const config = this.dependencies.loadConfig();
 			await this.auditConnectionEvent(config, {
 				command,
@@ -266,7 +283,7 @@ export class DatabaseConnectionManager {
 				pending.connection.databaseUrl,
 			);
 		} catch (err: unknown) {
-			const error = err instanceof Error ? err.message : String(err);
+			const error = sanitizeConnectionError(err);
 			await this.auditConnectionEvent(pending.config, {
 				command,
 				name: pending.connection.name,
@@ -278,7 +295,9 @@ export class DatabaseConnectionManager {
 			return { ok: false, operation, error };
 		}
 		if (!testResult.connected) {
-			const error = testResult.error ?? "Unknown connection error";
+			const error = sanitizeConnectionError(
+				testResult.error ?? "Unknown connection error",
+			);
 			await this.auditConnectionEvent(pending.config, {
 				command,
 				name: pending.connection.name,
@@ -330,6 +349,7 @@ export class DatabaseConnectionManager {
 			connection,
 			databaseVersion: testResult.version,
 			readOnly,
+			connectionWarnings: pending.connectionWarnings,
 			schema,
 		};
 	}
@@ -341,6 +361,7 @@ export class DatabaseConnectionManager {
 			readonly activeDatabaseId?: string;
 		},
 		name: string,
+		connectionWarnings: readonly ConnectionSecurityWarning[],
 	): PendingDatabaseConnection {
 		const normalizedName = normalizeDatabaseAlias(name);
 		const connection = snapshot.connections.find(
@@ -362,6 +383,7 @@ export class DatabaseConnectionManager {
 				prismaSchemaPath: connection.prismaSchemaPath,
 				prismaDatasourceName: connection.prismaDatasourceName,
 			},
+			connectionWarnings,
 		};
 	}
 
@@ -433,4 +455,5 @@ interface PendingDatabaseConnection {
 	readonly connections: DatabaseConnectionConfig[];
 	readonly activeDatabaseId?: string;
 	readonly connection: ActiveDatabaseConnection;
+	readonly connectionWarnings: readonly ConnectionSecurityWarning[];
 }

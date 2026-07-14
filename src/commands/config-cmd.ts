@@ -47,6 +47,15 @@ export function configShowCommand(): void {
 	if (active?.prismaDatasourceName) {
 		console.log(`  Datasource:   ${chalk.dim(active.prismaDatasourceName)}`);
 	}
+	const activeConnection = config.databaseConnections.find(
+		(connection) => connection.id === active?.id,
+	);
+	if (activeConnection?.privacyPolicy) {
+		const policy = activeConnection.privacyPolicy;
+		console.log(
+			`  Privacy:      enforced; cohort >= ${policy.minimumCohortSize}; ${policy.sensitiveColumns.length} classified columns; ${policy.allowedSensitiveViews.length} trusted views`,
+		);
+	}
 	console.log();
 	console.log(`  Safety:      ${safetyLevelLabel(config.safetyLevel)}`);
 	console.log(`  Safe mode:    ${boolLabel(config.safeMode)}`);

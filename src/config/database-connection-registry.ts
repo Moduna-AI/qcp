@@ -110,6 +110,12 @@ export class DatabaseConnectionRegistry {
 			prismaDatasourceName: input.prismaDatasourceName,
 			createdAt: existing?.createdAt ?? now,
 			updatedAt: now,
+			privacyPolicy: existing?.privacyPolicy ?? {
+				sensitiveColumns: [],
+				allowedSensitiveViews: [],
+				safeFunctions: [],
+				minimumCohortSize: 10,
+			},
 		};
 
 		const connections = existing

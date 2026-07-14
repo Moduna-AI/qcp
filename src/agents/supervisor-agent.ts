@@ -15,6 +15,7 @@ import {
 	createProviderDatabaseAgent,
 	type ProviderDatabaseAgent,
 } from "./provider-factory.js";
+import { QcpWorkflowCoordinator } from "./workflow-coordinator.js";
 
 export interface QcpSupervisorAgentOptions {
 	readonly config: QcpConfig;
@@ -55,10 +56,12 @@ export class QcpSupervisorAgentConfigurationError extends Error {
 
 export class QcpSupervisorAgent {
 	private readonly config: QcpConfig;
+	private readonly options: QcpSupervisorAgentOptions;
 	private readonly connectionName: string;
-	private readonly schema: DatabaseSchema;
-	private readonly databaseAgent: ProviderDatabaseAgent;
-	private readonly agent: Agent<"qcp-supervisor-agent">;
+	private schema: DatabaseSchema;
+	private databaseAgent: ProviderDatabaseAgent;
+	private agent: Agent<"qcp-supervisor-agent">;
+	private readonly workflowCoordinator: QcpWorkflowCoordinator;
 
 	public static async create(
 		options: QcpSupervisorAgentOptions,
@@ -78,6 +81,7 @@ export class QcpSupervisorAgent {
 	}
 
 	public constructor(options: QcpSupervisorAgentOptions) {
+		this.options = options;
 		this.config = options.config;
 		this.connectionName = options.connectionName ?? "default";
 		this.schema = options.schema;
@@ -87,13 +91,26 @@ export class QcpSupervisorAgent {
 			);
 		}
 		this.databaseAgent = options.databaseAgent;
-		this.agent = new MastraAgent({
+		this.agent = this.createSupervisorAgent();
+		this.workflowCoordinator = new QcpWorkflowCoordinator({
+			config: this.config,
+			connection: this.config.databaseConnections.find(
+				(connection) => connection.id === options.connectionId,
+			),
+			schema: this.schema,
+			onSchemaRefreshed: async (schema) => this.rehydrate(schema),
+			runFreePath: async (question) => this.generateFreePath(question),
+		});
+	}
+
+	private createSupervisorAgent(): Agent<"qcp-supervisor-agent"> {
+		return new MastraAgent({
 			id: "qcp-supervisor-agent",
 			name: "QCP Supervisor Agent",
 			description:
 				"Coordinates qcp database subagents and answers conversational database-assistant questions.",
 			instructions: this.buildInstructions(),
-			model: createMastraModelConfig(options.config),
+			model: createMastraModelConfig(this.config),
 			tools: createConfigTools(),
 			agents: {
 				database: this.databaseAgent.getAgent(),
@@ -135,24 +152,48 @@ export class QcpSupervisorAgent {
 			};
 		}
 
+		const workflowResult = await this.workflowCoordinator.run(question);
+		if (workflowResult.handled && workflowResult.text) {
+			return {
+				text: sanitizeSensitiveData(workflowResult.text),
+				latencyMs: Date.now() - start,
+				direct: false,
+			};
+		}
+
+		const text = await this.generateFreePath(question);
+
+		return {
+			text,
+			latencyMs: Date.now() - start,
+			direct: false,
+		};
+	}
+
+	private async generateFreePath(question: string): Promise<string> {
 		const response = await this.agent.generate(
 			buildSupervisorPrompt(question),
 			{
 				maxSteps: 8,
-				modelSettings: {
-					temperature: 0.2,
-				},
+				modelSettings: { temperature: 0.2 },
 				delegation: this.buildDelegationConfig(),
 			},
 		);
+		return sanitizeSensitiveData(response.text.trim());
+	}
 
-		return {
-			text: sanitizeSensitiveData(response.text.trim()),
-			tokensIn: response.usage?.inputTokens,
-			tokensOut: response.usage?.outputTokens,
-			latencyMs: Date.now() - start,
-			direct: false,
-		};
+	private async rehydrate(schema: DatabaseSchema): Promise<void> {
+		this.schema = schema;
+		this.databaseAgent = await createProviderDatabaseAgent({
+			config: this.config,
+			databaseUrl: this.options.databaseUrl,
+			schema,
+			connectionId: this.options.connectionId,
+			approvalHandler: this.options.approvalHandler,
+			auditContext: buildSupervisorAuditContext({ ...this.options, schema }),
+			semanticInteractive: this.options.semanticInteractive,
+		});
+		this.agent = this.createSupervisorAgent();
 	}
 
 	public async streamResponse(question: string): Promise<ChatAgentRunResponse> {

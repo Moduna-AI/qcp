@@ -18,8 +18,11 @@ import {
 	QueryPerformanceAnalyzer,
 } from "@/performance/query-performance-analyzer.js";
 import {
+	applyPrivacyEvaluation,
 	approvalReasonsForSafetyLevel,
+	auditPostgresPrivacyPosture,
 	enforceTenantIsolation,
+	evaluatePostgresPrivacyPolicy,
 	getApprovalReasons,
 	requiresSafetyApproval,
 	sanitizeDatabaseError,
@@ -37,6 +40,7 @@ import type {
 import type {
 	ApprovalReason,
 	DatabaseSchema,
+	PostgresPrivacyPolicy,
 	QueryResult,
 	SafetyLevel,
 	SecureQueryError,
@@ -67,6 +71,20 @@ const safetyReportSchema = z.object({
 	warnings: z.array(z.string()),
 	processedSql: z.string(),
 	statementType: z.string(),
+	privacyFindings: z
+		.array(
+			z.object({
+				type: z.enum([
+					"sensitive_column",
+					"minimum_cohort",
+					"unsafe_function",
+					"unsafe_clause",
+				]),
+				detail: z.string(),
+				object: z.string().optional(),
+			}),
+		)
+		.optional(),
 });
 
 const tenantIsolationReportSchema = z.object({
@@ -103,6 +121,19 @@ const databaseContextSchema = z.object({
 	schemaContext: z.string(),
 	prismaSchemaPath: z.string().optional(),
 	prismaSchema: z.string().optional(),
+});
+
+const postgresPrivacyPostureSchema = z.object({
+	role: z.string(),
+	checkedAt: z.string(),
+	findings: z.array(
+		z.object({
+			check: z.string(),
+			severity: z.enum(["info", "warning", "critical"]),
+			detail: z.string(),
+			remediation: z.string(),
+		}),
+	),
 });
 
 const queryPlanSummarySchema = z.object({
@@ -166,6 +197,7 @@ const transferResultSchema = z.discriminatedUnion("ok", [
 export interface CreateDatabaseToolsOptions {
 	readonly databaseUrl: string;
 	readonly schema: DatabaseSchema;
+	readonly privacyPolicy?: PostgresPrivacyPolicy;
 	readonly sensitiveTablePatterns?: readonly string[];
 	readonly queryExecutor?: DatabaseQueryExecutor;
 	readonly explainExecutor?: DatabaseExplainExecutor;
@@ -196,6 +228,7 @@ export function createDatabaseTools(
 					{
 						databaseUrl: options.databaseUrl,
 						schema: options.schema,
+						privacyPolicy: options.privacyPolicy,
 						queryExecutor,
 						sensitiveTablePatterns,
 						approvalHandler: options.approvalHandler,
@@ -265,6 +298,30 @@ export function createDatabaseTools(
 			},
 			execute: async ({ sql }) => validateSql(sql),
 		}),
+		qcp_audit_postgres_privacy_posture: createTool({
+			id: "qcp_audit_postgres_privacy_posture",
+			description:
+				"Audit the active PostgreSQL role and row-level-security posture using read-only catalog queries. Returns advisory findings and never executes DDL.",
+			inputSchema: z.object({}),
+			outputSchema: postgresPrivacyPostureSchema,
+			toModelOutput: sanitizedToolModelOutput,
+			mcp: {
+				annotations: {
+					title: "Audit PostgreSQL Privacy Posture",
+					readOnlyHint: true,
+					destructiveHint: false,
+					idempotentHint: true,
+					openWorldHint: false,
+				},
+			},
+			execute: async () =>
+				auditPostgresPrivacyPosture({
+					databaseUrl: options.databaseUrl,
+					queryExecutor,
+					schema: options.schema,
+					privacyPolicy: options.privacyPolicy,
+				}),
+		}),
 		qcp_execute_read_sql: createTool({
 			id: "qcp_execute_read_sql",
 			description:
@@ -297,6 +354,7 @@ export function createDatabaseTools(
 					sql,
 					databaseUrl: options.databaseUrl,
 					schema: options.schema,
+					privacyPolicy: options.privacyPolicy,
 					sensitiveTablePatterns,
 					explainExecutor,
 					safetyLevel,
@@ -320,6 +378,7 @@ export function createDatabaseTools(
 					{
 						databaseUrl: options.databaseUrl,
 						schema: options.schema,
+						privacyPolicy: options.privacyPolicy,
 						queryExecutor,
 						sensitiveTablePatterns,
 						enforceTenantIsolation: options.enforceTenantIsolation ?? false,
@@ -364,6 +423,7 @@ export function createDatabaseTools(
 					sql,
 					databaseUrl: options.databaseUrl,
 					schema: options.schema,
+					privacyPolicy: options.privacyPolicy,
 					sensitiveTablePatterns,
 					explainExecutor,
 					safetyLevel,
@@ -387,6 +447,7 @@ export function createDatabaseTools(
 					{
 						databaseUrl: options.databaseUrl,
 						schema: options.schema,
+						privacyPolicy: options.privacyPolicy,
 						explainExecutor,
 						sensitiveTablePatterns,
 						enforceTenantIsolation: options.enforceTenantIsolation ?? false,
@@ -432,6 +493,7 @@ export function createDatabaseTools(
 					sql,
 					databaseUrl: options.databaseUrl,
 					schema: options.schema,
+					privacyPolicy: options.privacyPolicy,
 					sensitiveTablePatterns,
 					explainExecutor,
 					safetyLevel,
@@ -455,6 +517,7 @@ export function createDatabaseTools(
 					{
 						databaseUrl: options.databaseUrl,
 						schema: options.schema,
+						privacyPolicy: options.privacyPolicy,
 						explainExecutor,
 						sensitiveTablePatterns,
 						enforceTenantIsolation: options.enforceTenantIsolation ?? false,
@@ -581,6 +644,7 @@ export function createDatabaseTools(
 export interface SecureReadOptions {
 	readonly databaseUrl: string;
 	readonly schema: DatabaseSchema;
+	readonly privacyPolicy?: PostgresPrivacyPolicy;
 	readonly queryExecutor?: DatabaseQueryExecutor;
 	readonly sensitiveTablePatterns?: readonly string[];
 	readonly enforceTenantIsolation?: boolean;
@@ -592,6 +656,7 @@ export interface SecureReadOptions {
 export interface SecureExplainOptions {
 	readonly databaseUrl: string;
 	readonly schema: DatabaseSchema;
+	readonly privacyPolicy?: PostgresPrivacyPolicy;
 	readonly explainExecutor?: DatabaseExplainExecutor;
 	readonly sensitiveTablePatterns?: readonly string[];
 	readonly enforceTenantIsolation?: boolean;
@@ -655,6 +720,7 @@ export async function executeSecureReadQuery(
 		options.schema,
 		options.sensitiveTablePatterns ?? [],
 		options.enforceTenantIsolation ?? false,
+		options.privacyPolicy,
 		context,
 	);
 	if (!base.ok) {
@@ -753,6 +819,7 @@ export async function executeSecureExplainQuery(
 		options.schema,
 		options.sensitiveTablePatterns ?? [],
 		options.enforceTenantIsolation ?? false,
+		options.privacyPolicy,
 		context,
 	);
 	if (!base.ok) {
@@ -861,6 +928,7 @@ export async function executeSecureQueryImprovementAnalysis(
 		options.schema,
 		options.sensitiveTablePatterns ?? [],
 		options.enforceTenantIsolation ?? false,
+		options.privacyPolicy,
 		context,
 	);
 	if (!base.ok) {
@@ -1019,9 +1087,13 @@ function prepareSecureQuery(
 	schema: DatabaseSchema,
 	sensitiveTablePatterns: readonly string[],
 	shouldEnforceTenantIsolation: boolean,
+	privacyPolicy?: PostgresPrivacyPolicy,
 	context?: unknown,
 ): SecureBaseResult {
-	const safety = validateSql(sql);
+	const safety = applyPrivacyEvaluation(
+		validateSql(sql),
+		evaluatePostgresPrivacyPolicy({ sql, schema, policy: privacyPolicy }),
+	);
 	if (!safety.safe) {
 		return {
 			ok: false,
@@ -1083,6 +1155,7 @@ interface ApprovalCheckOptions {
 	readonly sql: string;
 	readonly databaseUrl: string;
 	readonly schema: DatabaseSchema;
+	readonly privacyPolicy?: PostgresPrivacyPolicy;
 	readonly sensitiveTablePatterns: readonly string[];
 	readonly explainExecutor: DatabaseExplainExecutor;
 	readonly safetyLevel: SafetyLevel;
@@ -1094,7 +1167,14 @@ interface ApprovalCheckOptions {
 async function shouldRequireDatabaseToolApproval(
 	options: ApprovalCheckOptions,
 ): Promise<boolean> {
-	const safety = validateSql(options.sql);
+	const safety = applyPrivacyEvaluation(
+		validateSql(options.sql),
+		evaluatePostgresPrivacyPolicy({
+			sql: options.sql,
+			schema: options.schema,
+			policy: options.privacyPolicy,
+		}),
+	);
 	if (!safety.safe) return false;
 
 	const processedSql = options.enforceTenantIsolation

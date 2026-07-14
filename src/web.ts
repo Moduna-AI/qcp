@@ -34,6 +34,9 @@ import type {
 export type { QcpSupervisorAgent } from "./agents/supervisor-agent.js";
 
 const DEFAULT_WEB_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
+const WEB_AUTH_WINDOW_MS = 1000 * 60 * 5;
+const WEB_AUTH_MAX_FAILURES = 5;
+const webAuthFailures = new Map<string, number[]>();
 
 export interface QcpWebAuthSetup {
 	readonly created: boolean;
@@ -134,6 +137,7 @@ export function loginQcpWeb(passcode: string): {
 	readonly token: string;
 	readonly expiresAt: string;
 } {
+	assertWebAuthAttemptAllowed("login");
 	const normalizedPasscode = passcode.trim();
 	const config = loadConfig();
 	const webAuth = config.webAuth;
@@ -147,8 +151,10 @@ export function loginQcpWeb(passcode: string): {
 			webAuth.passcodeHash,
 		)
 	) {
-		throw new QcpWebAuthError("Invalid qcp-web passcode.");
+		recordWebAuthFailure("login");
+		throw new QcpWebAuthError("Authentication failed.");
 	}
+	clearWebAuthFailures("login");
 
 	const token = generateToken(32);
 	const now = new Date();
@@ -158,6 +164,7 @@ export function loginQcpWeb(passcode: string): {
 		webAuth: {
 			...webAuth,
 			sessionTokenHash: hashSecret(token, webAuth.passcodeSalt),
+			sessionExpiresAt: expiresAt.toISOString(),
 			updatedAt: now.toISOString(),
 		},
 	});
@@ -168,11 +175,30 @@ export function loginQcpWeb(passcode: string): {
 	};
 }
 
-export function validateQcpWebSession(token: string | undefined): boolean {
+export function validateQcpWebSession(
+	token: string | undefined,
+	config: QcpConfig = loadConfig(),
+): boolean {
 	if (!token) return false;
-	const webAuth = loadConfig().webAuth;
-	if (!webAuth?.sessionTokenHash) return false;
+	const webAuth = config.webAuth;
+	if (!webAuth?.sessionTokenHash || !webAuth.sessionExpiresAt) return false;
+	const expiresAt = Date.parse(webAuth.sessionExpiresAt);
+	if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return false;
 	return verifySecret(token, webAuth.passcodeSalt, webAuth.sessionTokenHash);
+}
+
+export function reauthenticateQcpWebSafetyDowngrade(passcode: string): void {
+	assertWebAuthAttemptAllowed("safety-downgrade");
+	const webAuth = loadConfig().webAuth;
+	const valid = Boolean(
+		webAuth &&
+			verifySecret(passcode.trim(), webAuth.passcodeSalt, webAuth.passcodeHash),
+	);
+	if (!valid) {
+		recordWebAuthFailure("safety-downgrade");
+		throw new QcpWebAuthError("Authentication failed.");
+	}
+	clearWebAuthFailures("safety-downgrade");
 }
 
 export function logoutQcpWeb(): void {
@@ -183,6 +209,7 @@ export function logoutQcpWeb(): void {
 		webAuth: {
 			...config.webAuth,
 			sessionTokenHash: undefined,
+			sessionExpiresAt: undefined,
 			updatedAt: new Date().toISOString(),
 		},
 	});
@@ -375,6 +402,29 @@ function verifySecret(
 	const expected = Buffer.from(expectedHash, "utf8");
 	if (actual.length !== expected.length) return false;
 	return timingSafeEqual(actual, expected);
+}
+
+function assertWebAuthAttemptAllowed(scope: string): void {
+	const cutoff = Date.now() - WEB_AUTH_WINDOW_MS;
+	const attempts = (webAuthFailures.get(scope) ?? []).filter(
+		(timestamp) => timestamp > cutoff,
+	);
+	webAuthFailures.set(scope, attempts);
+	if (attempts.length >= WEB_AUTH_MAX_FAILURES) {
+		throw new QcpWebAuthError("Authentication failed.");
+	}
+}
+
+function recordWebAuthFailure(scope: string): void {
+	const attempts = webAuthFailures.get(scope) ?? [];
+	webAuthFailures.set(
+		scope,
+		[...attempts, Date.now()].slice(-WEB_AUTH_MAX_FAILURES),
+	);
+}
+
+function clearWebAuthFailures(scope: string): void {
+	webAuthFailures.delete(scope);
 }
 
 function formatRuntimeDependencyMessage(details: {
