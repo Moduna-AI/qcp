@@ -1,5 +1,11 @@
+import { toAISdkStream } from "@mastra/ai-sdk";
+import type { MastraModelOutput } from "@mastra/core/stream";
 import type { QcpSupervisorAgent } from "@moduna/qcp/web";
-import { encodeStreamEvent } from "./api";
+import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
+import type { QcpWebApprovalData, QcpWebUIMessage } from "./api";
+import { type QcpChartSpec, qcpWebChartResultSchema } from "./chart-contract";
+
+const QCP_CHART_TOOL_ID = "qcp_render_chart";
 
 export interface PendingRun {
 	readonly supervisor: QcpSupervisorAgent;
@@ -26,149 +32,200 @@ export function createApprovalHandler(
 	};
 }
 
-export function streamHeaders(): HeadersInit {
-	return {
-		"Cache-Control": "no-cache, no-transform",
-		Connection: "keep-alive",
-		"Content-Type": "text/event-stream; charset=utf-8",
-	};
-}
-
 export function streamDirectText(text: string): Response {
-	return new Response(
-		new ReadableStream<Uint8Array>({
-			start(controller) {
-				writeEvent(controller, { type: "text", text });
-				writeEvent(controller, { type: "done" });
-				controller.close();
-			},
-		}),
-		{ headers: streamHeaders() },
-	);
+	return createQcpStreamResponse((writer) => {
+		const id = "qcp-direct-text";
+		writer.write({ type: "text-start", id });
+		writer.write({ type: "text-delta", id, delta: text });
+		writer.write({ type: "text-end", id });
+		writer.write({ type: "finish", finishReason: "stop" });
+	});
 }
 
 export function streamError(error: string, status = 200): Response {
-	return new Response(
-		new ReadableStream<Uint8Array>({
-			start(controller) {
-				writeEvent(controller, { type: "error", error });
-				writeEvent(controller, { type: "done" });
-				controller.close();
-			},
-		}),
-		{ headers: streamHeaders(), status },
-	);
+	return createQcpStreamResponse((writer) => {
+		writer.write({ type: "error", errorText: error });
+		writer.write({ type: "finish", finishReason: "error" });
+	}, status);
 }
 
-export function streamMastraOutput(
-	output: {
-		readonly fullStream?: AsyncIterable<unknown>;
-		readonly textStream?: AsyncIterable<string>;
-		readonly runId?: string;
-	},
+export function streamMastraOutput<TOutput>(
+	output: MastraModelOutput<TOutput>,
 	pending: PendingRun,
 ): Response {
-	return new Response(
-		new ReadableStream<Uint8Array>({
-			async start(controller) {
-				try {
-					if (output.fullStream) {
-						await streamFullOutput(
-							controller,
-							output.fullStream,
-							output.runId,
-							pending,
-						);
-					} else if (output.textStream) {
-						for await (const chunk of output.textStream) {
-							writeEvent(controller, { type: "text", text: chunk });
-						}
-					}
-					writeEvent(controller, { type: "done" });
-				} catch (error: unknown) {
-					const message =
-						error instanceof Error ? error.message : String(error);
-					writeEvent(controller, { type: "error", error: message });
-					writeEvent(controller, { type: "done" });
-				} finally {
-					controller.close();
-				}
-			},
-		}),
-		{ headers: streamHeaders() },
-	);
-}
+	return createQcpStreamResponse(async (writer) => {
+		let emittedChart = false;
+		let emittedFinish = false;
+		const stream = toAISdkStream(output, {
+			from: "agent",
+			version: "v6",
+			onError: () => "Assistant request failed.",
+		});
 
-async function streamFullOutput(
-	controller: ReadableStreamDefaultController<Uint8Array>,
-	fullStream: AsyncIterable<unknown>,
-	runId: string | undefined,
-	pending: PendingRun,
-): Promise<void> {
-	for await (const chunk of fullStream) {
-		const type = getChunkType(chunk);
-		if (type === "text-delta") {
-			const text = getChunkText(chunk);
-			if (text) writeEvent(controller, { type: "text", text });
-			continue;
-		}
-		if (type === "tool-call-approval") {
-			const approval = getApprovalPayload(chunk);
-			const effectiveRunId = runId ?? approval.runId;
-			if (effectiveRunId) {
-				pendingRuns.set(effectiveRunId, pending);
-				writeEvent(controller, {
-					type: "approval",
-					runId: effectiveRunId,
-					toolCallId: approval.toolCallId,
-					toolName: approval.toolName,
-					args: approval.args,
-				});
+		for await (const part of stream) {
+			if (!isRecord(part) || typeof part.type !== "string") continue;
+			const chunk = allowlistedChunk(part);
+			if (chunk) {
+				writer.write(chunk);
+				if (chunk.type === "finish") emittedFinish = true;
+			}
+
+			if (part.type === "data-tool-call-approval") {
+				const approval = parseApprovalData(part.data);
+				if (approval) {
+					pendingRuns.set(approval.runId, pending);
+					writer.write({
+						type: "data-approval",
+						id: approval.toolCallId ?? approval.runId,
+						data: approval,
+					});
+				}
+			}
+
+			if (part.type === "data-tool-agent") {
+				for (const chartResult of extractChartResults(part.data)) {
+					if (emittedChart) break;
+					emittedChart = true;
+					writer.write({
+						type: "data-chart",
+						id: chartResult.toolCallId,
+						data: chartResult.chart,
+					});
+				}
 			}
 		}
+
+		if (!emittedFinish) {
+			writer.write({ type: "finish", finishReason: "stop" });
+		}
+	});
+}
+
+type QcpStreamWriter = Parameters<
+	Parameters<typeof createUIMessageStream<QcpWebUIMessage>>[0]["execute"]
+>[0]["writer"];
+
+type QcpWebChunk = Parameters<QcpStreamWriter["write"]>[0];
+
+function createQcpStreamResponse(
+	execute: (writer: QcpStreamWriter) => Promise<void> | void,
+	status = 200,
+): Response {
+	const stream = createUIMessageStream<QcpWebUIMessage>({
+		execute: ({ writer }) => execute(writer),
+		onError: () => "Assistant request failed.",
+	});
+	return createUIMessageStreamResponse({ stream, status });
+}
+
+function allowlistedChunk(
+	part: Record<string, unknown>,
+): QcpWebChunk | undefined {
+	switch (part.type) {
+		case "text-start":
+			return typeof part.id === "string"
+				? { type: "text-start", id: part.id }
+				: undefined;
+		case "text-delta":
+			return typeof part.id === "string" && typeof part.delta === "string"
+				? { type: "text-delta", id: part.id, delta: part.delta }
+				: undefined;
+		case "text-end":
+			return typeof part.id === "string"
+				? { type: "text-end", id: part.id }
+				: undefined;
+		case "start-step":
+			return { type: "start-step" };
+		case "finish-step":
+			return { type: "finish-step" };
+		case "finish":
+			return {
+				type: "finish",
+				finishReason: normalizeFinishReason(part.finishReason),
+			};
+		case "error":
+			return {
+				type: "error",
+				errorText:
+					typeof part.errorText === "string"
+						? part.errorText
+						: "Assistant request failed.",
+			};
+		default:
+			return undefined;
 	}
 }
 
-function writeEvent(
-	controller: ReadableStreamDefaultController<Uint8Array>,
-	event: Parameters<typeof encodeStreamEvent>[0],
-): void {
-	controller.enqueue(new TextEncoder().encode(encodeStreamEvent(event)));
+function normalizeFinishReason(
+	value: unknown,
+): "stop" | "length" | "content-filter" | "tool-calls" | "error" | "other" {
+	return value === "stop" ||
+		value === "length" ||
+		value === "content-filter" ||
+		value === "tool-calls" ||
+		value === "error" ||
+		value === "other"
+		? value
+		: "other";
 }
 
-function getChunkType(chunk: unknown): string | undefined {
-	if (!isRecord(chunk)) return undefined;
-	return typeof chunk.type === "string" ? chunk.type : undefined;
-}
-
-function getChunkText(chunk: unknown): string | undefined {
-	if (!isRecord(chunk)) return undefined;
-	if (typeof chunk.text === "string") return chunk.text;
-	if (typeof chunk.textDelta === "string") return chunk.textDelta;
-	if (isRecord(chunk.payload)) {
-		if (typeof chunk.payload.text === "string") return chunk.payload.text;
-		if (typeof chunk.payload.textDelta === "string")
-			return chunk.payload.textDelta;
-	}
-	return undefined;
-}
-
-function getApprovalPayload(chunk: unknown): {
-	readonly runId?: string;
-	readonly toolCallId?: string;
-	readonly toolName?: string;
-	readonly args?: unknown;
-} {
-	if (!isRecord(chunk)) return {};
-	const payload = isRecord(chunk.payload) ? chunk.payload : chunk;
+function parseApprovalData(value: unknown): QcpWebApprovalData | undefined {
+	if (!isRecord(value) || typeof value.runId !== "string") return undefined;
 	return {
-		runId: typeof payload.runId === "string" ? payload.runId : undefined,
+		runId: value.runId,
 		toolCallId:
-			typeof payload.toolCallId === "string" ? payload.toolCallId : undefined,
-		toolName:
-			typeof payload.toolName === "string" ? payload.toolName : undefined,
-		args: "args" in payload ? payload.args : undefined,
+			typeof value.toolCallId === "string" ? value.toolCallId : undefined,
+		toolName: typeof value.toolName === "string" ? value.toolName : undefined,
+		args: redactApprovalArgs(value.args),
 	};
+}
+
+function redactApprovalArgs(
+	value: unknown,
+): Record<string, string> | undefined {
+	if (!isRecord(value)) return undefined;
+	const redacted: Record<string, string> = {};
+	for (const key of Object.keys(value)) {
+		redacted[key] =
+			key.toLowerCase() === "sql" ? "[REDACTED_SQL]" : "[REDACTED]";
+	}
+	return redacted;
+}
+
+export function extractChartResults(value: unknown): Array<{
+	readonly toolCallId: string;
+	readonly chart: QcpChartSpec;
+}> {
+	if (!isRecord(value)) return [];
+	const toolResults: unknown[] = [];
+	collectToolResults(value.toolResults, toolResults);
+	if (Array.isArray(value.steps)) {
+		for (const step of value.steps) {
+			if (!isRecord(step)) continue;
+			collectToolResults(step.toolResults, toolResults);
+			collectToolResults(step.staticToolResults, toolResults);
+		}
+	}
+
+	const charts: Array<{ toolCallId: string; chart: QcpChartSpec }> = [];
+	for (const candidate of toolResults) {
+		if (!isRecord(candidate) || candidate.toolName !== QCP_CHART_TOOL_ID)
+			continue;
+		const result = qcpWebChartResultSchema.safeParse(candidate.result);
+		if (!result.success || !result.data.ok) continue;
+		charts.push({
+			toolCallId:
+				typeof candidate.toolCallId === "string"
+					? candidate.toolCallId
+					: `chart-${charts.length + 1}`,
+			chart: result.data.chart,
+		});
+	}
+	return charts;
+}
+
+function collectToolResults(value: unknown, output: unknown[]): void {
+	if (Array.isArray(value)) output.push(...value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -32,6 +32,13 @@ import type {
 } from "./types/index.js";
 
 export type { QcpSupervisorAgent } from "./agents/supervisor-agent.js";
+export {
+	type QcpChartResult,
+	type QcpChartSpec,
+	qcpChartInputSchema,
+	qcpChartResultSchema,
+	qcpChartSpecSchema,
+} from "./types/chart.js";
 
 const DEFAULT_WEB_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const WEB_AUTH_WINDOW_MS = 1000 * 60 * 5;
@@ -320,7 +327,10 @@ export async function createQcpWebSupervisor(options: {
 		});
 	}
 
-	const { QcpSupervisorAgent } = await import("./agents/supervisor-agent.js");
+	const [{ QcpSupervisorAgent }, { createChartTools }] = await Promise.all([
+		import("./agents/supervisor-agent.js"),
+		import("./agents/chart-tools.js"),
+	]);
 	const supervisor = await QcpSupervisorAgent.create({
 		config,
 		command: "web",
@@ -331,8 +341,8 @@ export async function createQcpWebSupervisor(options: {
 		schema: resolved.schema,
 		approvalHandler: options.approvalHandler,
 		semanticInteractive: false,
+		additionalDatabaseTools: createChartTools(),
 	});
-
 	return {
 		...resolved,
 		config,

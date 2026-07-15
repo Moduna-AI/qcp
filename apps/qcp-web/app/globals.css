@@ -194,6 +194,36 @@ pre,
 	font-size: 12px;
 }
 
+.chart-card {
+	width: 100%;
+	outline: none;
+	white-space: normal;
+}
+
+.chart-card:focus-visible {
+	border-radius: 6px;
+	box-shadow: 0 0 0 2px var(--accent);
+}
+
+.chart-card h3 {
+	margin: 0 0 14px;
+	font-size: 15px;
+}
+
+.chart-frame {
+	height: clamp(280px, 42vw, 380px);
+	min-width: 0;
+}
+
+.chart-card .recharts-cartesian-grid line {
+	stroke: var(--line);
+}
+
+.chart-card .recharts-text {
+	fill: var(--muted);
+	font-size: 12px;
+}
+
 .composer {
 	border-top: 1px solid var(--line);
 	padding: 14px 18px 18px;

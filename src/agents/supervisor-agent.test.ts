@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { PromptViolationError } from "@/llm/prompts.js";
 import type { DatabaseSchema, QcpConfig } from "@/types/index.js";
+import { createChartTools } from "./chart-tools.js";
 import {
 	approvalReasonsForTool,
 	detectFullSqliteImportPath,
@@ -61,6 +62,36 @@ describe("qcp supervisor agent", () => {
 		expect(supervisorTools).toHaveProperty("qcp_import_sqlite_database");
 		expect(supervisor.getSubAgents().database.getTools()).not.toHaveProperty(
 			"qcp_read_config_context",
+		);
+		expect(supervisor.getSubAgents().database.getTools()).not.toHaveProperty(
+			"qcp_render_chart",
+		);
+	});
+
+	test("preserves the web chart tool and one-chart instructions during rehydration", async () => {
+		const supervisor = await QcpSupervisorAgent.create({
+			config: configWithDatabaseType("supabase"),
+			databaseUrl: "postgres://example",
+			schema,
+			additionalDatabaseTools: createChartTools(),
+		});
+
+		expect(supervisor.getDatabaseAgent().getTools()).toHaveProperty(
+			"qcp_render_chart",
+		);
+		const instructions = await supervisor
+			.getDatabaseAgent()
+			.getAgent()
+			.getInstructions();
+		expect(instructions).toContain("Call qcp_render_chart at most once");
+
+		const rehydrate = Reflect.get(supervisor, "rehydrate") as (
+			nextSchema: DatabaseSchema,
+		) => Promise<void>;
+		await rehydrate.call(supervisor, { ...schema, scannedAt: "2026-07-15" });
+
+		expect(supervisor.getDatabaseAgent().getTools()).toHaveProperty(
+			"qcp_render_chart",
 		);
 	});
 

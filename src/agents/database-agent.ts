@@ -91,11 +91,23 @@ export abstract class AbstractDatabaseAgent<TAgentId extends string = string> {
 	protected buildInstructions(): string {
 		return [
 			...this.getBaseInstructions(),
+			...this.getChartInstructions(),
 			`Database type: ${this.getDatabaseType()}.`,
 			...this.toInstructionList(this.getDatabaseInstructions()),
 			...this.toInstructionList(this.config.instructions ?? []),
 			...this.getAdditionalInstructions(),
 		].join("\n\n");
+	}
+
+	private getChartInstructions(): string[] {
+		if (!("qcp_render_chart" in this.tools)) return [];
+		return [
+			"When the user explicitly asks for a chart, first retrieve suitable rows with qcp_execute_read_sql, then call qcp_render_chart once when the result is chartable.",
+			"You may call qcp_render_chart without an explicit request only for a meaningful multi-point trend, comparison, or distribution. Do not chart a single scalar, empty result, or text-heavy records.",
+			"All chart values, aggregations, percentages, bins, and derived metrics must come from validated SQL. Never calculate or invent chart values in the model or chart tool.",
+			"Use bar, line, area, pie/donut, or scatter. Use a faithful equivalent such as a binned bar chart for a histogram; otherwise explain that the requested chart type is unsupported.",
+			"Call qcp_render_chart at most once per response. After a successful chart tool call, respond only with: Chart rendered.",
+		];
 	}
 
 	protected createAgent(): Agent<TAgentId, ToolsInput> {

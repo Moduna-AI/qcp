@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createQcpWebSupervisor } from "@moduna/qcp/web";
-import { chatRequestSchema } from "~/lib/api";
+import { chatRequestSchema, getLatestUserText } from "~/lib/api";
 import { requireAuthenticated } from "~/lib/auth";
 import {
 	createApprovalHandler,
@@ -21,6 +21,10 @@ export async function POST(request: Request): Promise<Response> {
 	if (!parsed.success) {
 		return Response.json({ error: "Message is required." }, { status: 400 });
 	}
+	const message = getLatestUserText(parsed.data.messages);
+	if (!message) {
+		return Response.json({ error: "Message is required." }, { status: 400 });
+	}
 
 	try {
 		const approvedToolCallIds = new Set<string>();
@@ -34,17 +38,14 @@ export async function POST(request: Request): Promise<Response> {
 			supervisor: session.supervisor,
 			approvedToolCallIds,
 		};
-		const response = await session.supervisor.streamResponse(
-			parsed.data.message,
-		);
+		const response = await session.supervisor.streamResponse(message);
 		if (response.direct) {
 			return streamDirectText(response.text);
 		}
 		const runId = response.stream.runId;
 		if (runId) pendingRuns.set(runId, pending);
 		return streamMastraOutput(response.stream, pending);
-	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : String(error);
-		return streamError(message);
+	} catch {
+		return streamError("Assistant request failed.");
 	}
 }

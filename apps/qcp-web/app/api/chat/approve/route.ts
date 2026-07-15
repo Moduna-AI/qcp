@@ -40,8 +40,7 @@ export async function handleApprovalRequest(
 					toolCallId: parsed.data.toolCallId,
 				});
 		return streamMastraOutput(stream, pending);
-	} catch (error: unknown) {
-		const message = error instanceof Error ? error.message : String(error);
-		return streamError(message);
+	} catch {
+		return streamError("Assistant request failed.");
 	}
 }

@@ -11,6 +11,12 @@
 			"sourceType": "github",
 			"skillPath": "skills/mastra/SKILL.md",
 			"computedHash": "f0ca76d36d67a345064f471a9577e752beb2b20ab46acdf154ed223905e1d3a4"
+		},
+		"recharts": {
+			"source": "ansanabria/skills",
+			"sourceType": "github",
+			"skillPath": "skills/recharts/SKILL.md",
+			"computedHash": "a34ecf6ee1664a089e800a7cec095e114c6c3e8a11a06d3dfe98a39aac13f70c"
 		}
 	}
 }

@@ -2,30 +2,27 @@ import { describe, expect, test } from "bun:test";
 import {
 	approvalRequestSchema,
 	chatRequestSchema,
-	encodeStreamEvent,
+	getLatestUserText,
 	loginRequestSchema,
-	parseStreamEvent,
+	qcpWebDataPartSchemas,
 	safetyConfigRequestSchema,
 	setupRequestSchema,
 } from "./api";
 
 describe("qcp-web API helpers", () => {
-	test("validates auth, chat, and approval request bodies", () => {
+	test("validates auth, AI SDK chat, and approval request bodies", () => {
 		expect(loginRequestSchema.parse({ passcode: " local " }).passcode).toBe(
 			"local",
 		);
 		expect(setupRequestSchema.parse({ passcode: " 1234 " }).passcode).toBe(
 			"1234",
 		);
-		expect(chatRequestSchema.parse({ message: "show tables" }).message).toBe(
-			"show tables",
-		);
-		expect(
-			chatRequestSchema.parse({
-				message: "show tables",
-				safetyLevel: "strict",
-			}).safetyLevel,
-		).toBe("strict");
+		const request = chatRequestSchema.parse({
+			messages: [userMessage("show tables")],
+			safetyLevel: "strict",
+		});
+		expect(getLatestUserText(request.messages)).toBe("show tables");
+		expect(request.safetyLevel).toBe("strict");
 		expect(
 			safetyConfigRequestSchema.parse({ safetyLevel: "low" }).safetyLevel,
 		).toBe("low");
@@ -41,25 +38,51 @@ describe("qcp-web API helpers", () => {
 		expect(() => setupRequestSchema.parse({ passcode: "123" })).toThrow();
 		expect(() => setupRequestSchema.parse({ passcode: "12345" })).toThrow();
 		expect(() => setupRequestSchema.parse({ passcode: "abcd" })).toThrow();
-		expect(() => chatRequestSchema.parse({ message: "" })).toThrow();
+		expect(() => chatRequestSchema.parse({ messages: [] })).toThrow();
 		expect(() =>
 			safetyConfigRequestSchema.parse({ safetyLevel: "unsafe" }),
 		).toThrow();
 	});
 
-	test("round-trips stream events", () => {
-		const line = encodeStreamEvent({
-			type: "approval",
-			runId: "run-1",
-			toolCallId: "tool-1",
-			toolName: "qcp_execute_read_sql",
-		}).trim();
+	test("uses only the newest user text and ignores assistant data parts", () => {
+		const messages = [
+			userMessage("old question"),
+			{
+				id: "assistant-1",
+				role: "assistant" as const,
+				parts: [{ type: "data-chart", data: { sensitive: true } }],
+			},
+			userMessage("new question"),
+		];
 
-		expect(parseStreamEvent(line)).toEqual({
-			type: "approval",
-			runId: "run-1",
-			toolCallId: "tool-1",
-			toolName: "qcp_execute_read_sql",
+		expect(getLatestUserText(messages)).toBe("new question");
+	});
+
+	test("validates persistent chart data parts", () => {
+		const chart = qcpWebDataPartSchemas.chart.parse({
+			version: 1,
+			type: "bar",
+			title: "Tracks by genre",
+			xKey: "genre",
+			series: [{ key: "tracks", label: "Tracks" }],
+			data: [{ genre: "Rock", tracks: 100 }],
 		});
+
+		expect(chart.type).toBe("bar");
+		expect(qcpWebDataPartSchemas.approval.parse({ runId: "run-1" }).runId).toBe(
+			"run-1",
+		);
 	});
 });
+
+function userMessage(text: string): {
+	id: string;
+	role: "user";
+	parts: Array<{ type: "text"; text: string }>;
+} {
+	return {
+		id: crypto.randomUUID(),
+		role: "user",
+		parts: [{ type: "text", text }],
+	};
+}

@@ -1,21 +1,16 @@
 "use client";
 
+import { useChat } from "@ai-sdk/react";
 import type { QcpWebConnectionSummary } from "@moduna/qcp/web";
+import { DefaultChatTransport } from "ai";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { parseStreamEvent, type QcpWebStreamEvent } from "~/lib/api";
-
-interface ChatMessage {
-	readonly id: string;
-	readonly role: "user" | "assistant";
-	readonly text: string;
-}
-
-interface PendingApproval {
-	readonly runId: string;
-	readonly toolCallId?: string;
-	readonly toolName?: string;
-	readonly args?: unknown;
-}
+import { ChartCard } from "~/components/chart-card";
+import {
+	type QcpWebApprovalData,
+	type QcpWebUIMessage,
+	qcpWebDataPartSchemas,
+} from "~/lib/api";
+import { readQcpWebUIMessageStream } from "~/lib/ui-stream";
 
 type SafetyLevel = "low" | "standard" | "strict";
 
@@ -25,13 +20,39 @@ export function AssistantShell(): React.ReactElement {
 		string | undefined
 	>();
 	const [safetyLevel, setSafetyLevel] = useState<SafetyLevel>("standard");
-	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [input, setInput] = useState("");
-	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState<string | undefined>();
+	const [localError, setLocalError] = useState<string | undefined>();
+	const [continuingApproval, setContinuingApproval] = useState(false);
 	const [pendingApproval, setPendingApproval] = useState<
-		PendingApproval | undefined
+		QcpWebApprovalData | undefined
 	>();
+
+	const transport = useMemo(
+		() =>
+			new DefaultChatTransport<QcpWebUIMessage>({
+				api: "/api/chat",
+				prepareSendMessagesRequest: ({ messages, body }) => ({
+					body: {
+						...body,
+						messages: messages.slice(-1),
+					},
+				}),
+			}),
+		[],
+	);
+	const {
+		error: chatError,
+		messages,
+		sendMessage,
+		setMessages,
+		status,
+	} = useChat<QcpWebUIMessage>({
+		transport,
+		dataPartSchemas: qcpWebDataPartSchemas,
+		onData: (part) => {
+			if (part.type === "data-approval") setPendingApproval(part.data);
+		},
+	});
 
 	const activeConnection = useMemo(
 		() =>
@@ -42,11 +63,13 @@ export function AssistantShell(): React.ReactElement {
 			connections[0],
 		[connections, selectedConnection],
 	);
+	const loading =
+		status === "submitted" || status === "streaming" || continuingApproval;
 
 	const loadConnections = useCallback(async (): Promise<void> => {
 		const response = await fetch("/api/qcp/connections");
 		if (!response.ok) {
-			setError("Could not load qcp connections.");
+			setLocalError("Could not load qcp connections.");
 			return;
 		}
 		const body = (await response.json()) as {
@@ -80,9 +103,8 @@ export function AssistantShell(): React.ReactElement {
 						"Enter your qcp-web passcode to confirm the safety downgrade.",
 					)
 				: undefined;
-		if (nextSafetyLevel === "low" && safetyLevel !== "low" && !passcode) {
-			return;
-		}
+		if (nextSafetyLevel === "low" && safetyLevel !== "low" && !passcode) return;
+
 		setSafetyLevel(nextSafetyLevel);
 		const response = await fetch("/api/qcp/safety", {
 			method: "POST",
@@ -90,7 +112,7 @@ export function AssistantShell(): React.ReactElement {
 			body: JSON.stringify({ safetyLevel: nextSafetyLevel, passcode }),
 		});
 		if (!response.ok) {
-			setError("Could not update safety level.");
+			setLocalError("Could not update safety level.");
 			await loadSafetyConfig();
 		}
 	}
@@ -104,96 +126,78 @@ export function AssistantShell(): React.ReactElement {
 		event: React.FormEvent<HTMLFormElement>,
 	): Promise<void> {
 		event.preventDefault();
-		const message = input.trim();
-		if (!message || loading) return;
+		const text = input.trim();
+		if (!text || loading) return;
 
 		setInput("");
-		setError(undefined);
+		setLocalError(undefined);
 		setPendingApproval(undefined);
-		const assistantId = crypto.randomUUID();
-		setMessages((current) => [
-			...current,
-			{ id: crypto.randomUUID(), role: "user", text: message },
-			{ id: assistantId, role: "assistant", text: "" },
-		]);
-		setLoading(true);
-		await postAndReadStream(
-			"/api/chat",
+		await sendMessage(
+			{ text },
 			{
-				message,
-				connectionName: activeConnection?.name,
-				safetyLevel,
+				body: {
+					connectionName: activeConnection?.name,
+					safetyLevel,
+				},
 			},
-			assistantId,
 		);
-		setLoading(false);
 	}
 
 	async function answerApproval(approve: boolean): Promise<void> {
-		if (!pendingApproval) return;
-		setLoading(true);
-		setError(undefined);
-		const assistantId = crypto.randomUUID();
-		setMessages((current) => [
-			...current,
-			{
-				id: assistantId,
-				role: "assistant",
-				text: approve
-					? "Approved. Continuing...\n\n"
-					: "Declined. Continuing...\n\n",
-			},
-		]);
+		if (!pendingApproval || continuingApproval) return;
 		const approval = pendingApproval;
+		const assistantId = crypto.randomUUID();
+		const initialMessage: QcpWebUIMessage = {
+			id: assistantId,
+			role: "assistant",
+			parts: [],
+		};
+
 		setPendingApproval(undefined);
-		await postAndReadStream(
-			"/api/chat/approve",
-			{
-				runId: approval.runId,
-				toolCallId: approval.toolCallId,
-				approve,
-			},
-			assistantId,
-		);
-		setLoading(false);
-	}
+		setLocalError(undefined);
+		setContinuingApproval(true);
+		setMessages((current) => [...current, initialMessage]);
 
-	async function postAndReadStream(
-		url: string,
-		body: Record<string, unknown>,
-		assistantId: string,
-	): Promise<void> {
-		const response = await fetch(url, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(body),
-		});
-		if (!response.ok || !response.body) {
-			setError("Assistant request failed.");
-			return;
+		try {
+			const response = await fetch(
+				approve ? "/api/chat/approve" : "/api/chat/decline",
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						runId: approval.runId,
+						toolCallId: approval.toolCallId,
+						approve,
+					}),
+				},
+			);
+			if (!response.ok || !response.body) {
+				setLocalError("Assistant request failed.");
+				return;
+			}
+
+			await readQcpWebUIMessageStream(
+				response.body,
+				initialMessage,
+				(message) => {
+					setMessages((current) =>
+						current.map((existing) =>
+							existing.id === assistantId ? message : existing,
+						),
+					);
+					const nextApproval = message.parts.find(
+						(part) => part.type === "data-approval",
+					);
+					if (nextApproval?.type === "data-approval") {
+						setPendingApproval(nextApproval.data);
+					}
+				},
+			);
+		} catch {
+			setLocalError("Assistant request failed.");
+		} finally {
+			setContinuingApproval(false);
 		}
-		await readEventStream(response.body, (event) => {
-			if (event.type === "text") {
-				appendAssistantText(assistantId, event.text);
-			}
-			if (event.type === "approval") {
-				setPendingApproval(event);
-			}
-			if (event.type === "error") {
-				setError(event.error);
-				appendAssistantText(assistantId, event.error);
-			}
-		});
-	}
-
-	function appendAssistantText(assistantId: string, text: string): void {
-		setMessages((current) =>
-			current.map((message) =>
-				message.id === assistantId
-					? { ...message, text: `${message.text}${text}` }
-					: message,
-			),
-		);
 	}
 
 	return (
@@ -303,10 +307,7 @@ export function AssistantShell(): React.ReactElement {
 						</div>
 					) : (
 						messages.map((message) => (
-							<div className={`message ${message.role}`} key={message.id}>
-								<div className="label mono">{message.role}</div>
-								{message.text || "Thinking..."}
-							</div>
+							<MessageView key={message.id} message={message} />
 						))
 					)}
 					{pendingApproval ? (
@@ -332,7 +333,11 @@ export function AssistantShell(): React.ReactElement {
 							</div>
 						</div>
 					) : null}
-					{error ? <p className="error">{error}</p> : null}
+					{localError || chatError ? (
+						<p className="error">
+							{localError ?? chatError?.message ?? "Assistant request failed."}
+						</p>
+					) : null}
 				</section>
 
 				<section className="composer">
@@ -360,28 +365,25 @@ export function AssistantShell(): React.ReactElement {
 	);
 }
 
-async function readEventStream(
-	body: ReadableStream<Uint8Array>,
-	onEvent: (event: QcpWebStreamEvent) => void,
-): Promise<void> {
-	const reader = body.getReader();
-	const decoder = new TextDecoder();
-	let buffer = "";
+function MessageView({
+	message,
+}: {
+	readonly message: QcpWebUIMessage;
+}): React.ReactElement {
+	const chartPart = message.parts.find((part) => part.type === "data-chart");
+	const text = message.parts
+		.filter((part) => part.type === "text")
+		.map((part) => (part.type === "text" ? part.text : ""))
+		.join("");
 
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		buffer += decoder.decode(value, { stream: true });
-		const parts = buffer.split("\n\n");
-		buffer = parts.pop() ?? "";
-		for (const part of parts) {
-			const event = parseStreamEvent(part.trim());
-			if (event) onEvent(event);
-		}
-	}
-
-	if (buffer.trim()) {
-		const event = parseStreamEvent(buffer.trim());
-		if (event) onEvent(event);
-	}
+	return (
+		<div className={`message ${message.role}`}>
+			<div className="label mono">{message.role}</div>
+			{chartPart?.type === "data-chart" ? (
+				<ChartCard chart={chartPart.data} />
+			) : (
+				text || "Thinking..."
+			)}
+		</div>
+	);
 }

@@ -1,4 +1,4 @@
-import type { Agent, DelegationConfig } from "@mastra/core/agent";
+import type { Agent, DelegationConfig, ToolsInput } from "@mastra/core/agent";
 import { Agent as MastraAgent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core/mastra";
 import { InMemoryStore } from "@mastra/core/storage";
@@ -53,6 +53,7 @@ export interface QcpSupervisorAgentOptions {
 	readonly schema: DatabaseSchema;
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
 	readonly semanticInteractive?: boolean;
+	readonly additionalDatabaseTools?: ToolsInput;
 	readonly databaseAgent?: ProviderDatabaseAgent;
 	readonly sqliteDatabaseImporter?: SupervisorSqliteImporter;
 }
@@ -104,6 +105,7 @@ export class QcpSupervisorAgent {
 				approvalHandler: options.approvalHandler,
 				auditContext: buildSupervisorAuditContext(options),
 				semanticInteractive: options.semanticInteractive,
+				tools: options.additionalDatabaseTools,
 			}));
 		return new QcpSupervisorAgent({ ...options, databaseAgent });
 	}
@@ -342,6 +344,7 @@ export class QcpSupervisorAgent {
 			approvalHandler: this.options.approvalHandler,
 			auditContext: buildSupervisorAuditContext({ ...this.options, schema }),
 			semanticInteractive: this.options.semanticInteractive,
+			tools: this.options.additionalDatabaseTools,
 		});
 		this.agent = this.createSupervisorAgent();
 	}
@@ -381,6 +384,13 @@ export class QcpSupervisorAgent {
 	}
 
 	private buildInstructions(): string {
+		const chartInstructions = this.options.additionalDatabaseTools
+			?.qcp_render_chart
+			? [
+					"The database subagent can render one qcp-web chart from validated query results. Delegate explicit chart requests and useful trend, comparison, or distribution questions to it.",
+					"When the database subagent reports that a chart was rendered, do not repeat the chart data or add a prose summary.",
+				]
+			: [];
 		return [
 			"You are qcp, a conversational database assistant.",
 			"Answer normal chat and capability questions directly. Do not delegate unless the user asks for database facts, examples, analysis, aggregations, or query results.",
@@ -395,6 +405,7 @@ export class QcpSupervisorAgent {
 			"Do not expose raw sensitive values. Summarize or aggregate when privacy-sensitive data may be involved.",
 			"When the database subagent returns results, synthesize a concise natural-language answer. SQL is an implementation detail unless the user explicitly asks to see it.",
 			"When the database subagent returns import/export tool results, report the file path, format, row count, destination table when present, and any refusal reason.",
+			...chartInstructions,
 			`Active database connection: ${this.connectionName}.`,
 			`Configured database type: ${this.config.databaseType}.`,
 			`Loaded schema: ${this.schema.databaseName} with ${this.schema.tableCount} tables.`,
