@@ -135,7 +135,7 @@ export function printResults(result: QueryResult): void {
 // ─── Approval prompt ──────────────────────────────────────────────────────────
 
 export function printApprovalWarning(reasons: ApprovalReason[]): void {
-	console.log(chalk.yellow.bold("\n⚠  Potentially sensitive query detected"));
+	console.log(chalk.yellow.bold("\n⚠  Operation requires approval"));
 	console.log(chalk.yellow("   Reasons:"));
 	for (const reason of reasons) {
 		console.log(chalk.yellow(`   • ${reason.detail}`));

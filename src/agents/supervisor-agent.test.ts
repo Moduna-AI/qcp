@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { PromptViolationError } from "@/llm/prompts.js";
 import type { DatabaseSchema, QcpConfig } from "@/types/index.js";
 import {
+	approvalReasonsForTool,
+	detectFullSqliteImportPath,
+	formatSqliteImportResult,
+	formatToolApprovalOperation,
 	getDirectChatAnswer,
 	QcpSupervisorAgent,
 	QcpSupervisorAgentConfigurationError,
@@ -54,6 +58,7 @@ describe("qcp supervisor agent", () => {
 		);
 		const supervisorTools = await supervisor.getAgent().listTools();
 		expect(supervisorTools).toHaveProperty("qcp_read_config_context");
+		expect(supervisorTools).toHaveProperty("qcp_import_sqlite_database");
 		expect(supervisor.getSubAgents().database.getTools()).not.toHaveProperty(
 			"qcp_read_config_context",
 		);
@@ -106,6 +111,95 @@ describe("qcp supervisor agent", () => {
 
 		expect(answer).toContain("projects");
 		expect(answer).toContain("observability.llm_spans");
+	});
+
+	test("shows the cached schema directly", () => {
+		const answer = getDirectChatAnswer(
+			"Show schema in the chinook database.",
+			schema,
+		);
+
+		expect(answer).toContain("projects");
+		expect(answer).toContain("observability.llm_spans");
+	});
+
+	test("formats full database import approval without exposing a destination URL", () => {
+		const payload = {
+			toolCallId: "tool-1",
+			toolName: "qcp_import_sqlite_database",
+			args: { filePath: "./Chinook_Sqlite.sqlite" },
+		};
+
+		expect(approvalReasonsForTool(payload)[0]?.detail).toContain(
+			"active Supabase connection",
+		);
+		expect(formatToolApprovalOperation(payload, "chinook")).toBe(
+			"IMPORT SQLITE DATABASE ./Chinook_Sqlite.sqlite INTO chinook.public",
+		);
+		expect(formatToolApprovalOperation(payload, "chinook")).not.toContain(
+			"postgres://",
+		);
+	});
+
+	test("detects full SQLite database imports deterministically", () => {
+		expect(
+			detectFullSqliteImportPath(
+				"Import ./Chinook_Sqlite.sqlite into supabase chinook database.",
+			),
+		).toBe("./Chinook_Sqlite.sqlite");
+		expect(detectFullSqliteImportPath("Import customers.csv")).toBeNull();
+	});
+
+	test("runs a detected SQLite import with one approval and no model call", async () => {
+		const approvals: string[] = [];
+		const supervisor = await QcpSupervisorAgent.create({
+			config: configWithDatabaseType("supabase"),
+			databaseUrl: "postgres://example",
+			schema,
+			connectionName: "chinook",
+			approvalHandler: async (_reasons, operation) => {
+				approvals.push(operation);
+				return true;
+			},
+			sqliteDatabaseImporter: {
+				importDatabase: async () => ({
+					ok: true,
+					sourcePath: "/workspace/Chinook_Sqlite.sqlite",
+					targetSchema: "public",
+					tableCount: 11,
+					totalRowCount: 15_607,
+					tables: [
+						{ sourceTable: "Artist", targetTable: "artist", rowCount: 275 },
+					],
+					durationMs: 10,
+					schemaRefreshed: true,
+				}),
+			},
+		});
+
+		const response = await supervisor.generateResponse(
+			"Import ./Chinook_Sqlite.sqlite into supabase chinook database.",
+		);
+
+		expect(approvals).toEqual([
+			"IMPORT SQLITE DATABASE ./Chinook_Sqlite.sqlite INTO chinook.public",
+		]);
+		expect(response.text).toContain("11 tables and 15607 rows");
+		expect(response.text).toContain("artist: 275");
+	});
+
+	test("formats rolled-back SQLite failures", () => {
+		expect(
+			formatSqliteImportResult(
+				{
+					ok: false,
+					category: "destination_conflict",
+					error: "artist already exists",
+					rolledBack: true,
+				},
+				"chinook",
+			),
+		).toContain("transaction was rolled back");
 	});
 });
 

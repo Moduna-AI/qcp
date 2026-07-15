@@ -187,8 +187,10 @@ export function transferFormatPackageGroup(
 }
 
 function detectDirection(question: string): DatabaseTransferDirection | null {
-	if (/\b(export|dump|download|save)\b/.test(question)) return "export";
-	if (/\b(import|load|upload|ingest)\b/.test(question)) return "import";
+	if (/\bimport\b/.test(question)) return "import";
+	if (/\bexport\b/.test(question)) return "export";
+	if (/\b(dump|download|save)\b/.test(question)) return "export";
+	if (/\b(load|upload|ingest)\b/.test(question)) return "import";
 	return null;
 }
 

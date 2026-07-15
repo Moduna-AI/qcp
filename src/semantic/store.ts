@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { v7 as uuidv7 } from "uuid";
 import { LOCAL_SEMANTIC_DB_PATH } from "@/config/index.js";
-import { importPackageFromStore } from "@/packages/lazy-packages.js";
+import { createLocalSqliteClient } from "@/sqlite-client.js";
 import type {
 	AddSemanticAnnotationInput,
 	SemanticAnnotation,
@@ -37,10 +37,6 @@ export interface SemanticSqlClient {
 			| { readonly sql: string; readonly args?: readonly SemanticSqlValue[] },
 	): Promise<SemanticSqlResult>;
 	close(): void | Promise<void>;
-}
-
-interface LibsqlModule {
-	createClient(config: { readonly url: string }): SemanticSqlClient;
 }
 
 export interface SemanticStoreOptions {
@@ -666,13 +662,7 @@ export class SemanticStore {
 			if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 		}
 
-		const libsql = await importPackageFromStore<LibsqlModule>("@libsql/client");
-		this.client = libsql.createClient({
-			url:
-				this.databasePath === ":memory:"
-					? "file::memory:"
-					: `file:${this.databasePath}`,
-		});
+		this.client = await createLocalSqliteClient(this.databasePath);
 		return this.client;
 	}
 

@@ -354,7 +354,7 @@ async function promptForTransferFormat(
 		format: ReturnType<typeof supportedTransferFormatChoices>[number];
 	}>([
 		{
-			type: "list",
+			type: "select",
 			name: "format",
 			message: `Select ${direction} file format`,
 			choices: choices.map((choice) => ({ name: choice, value: choice })),
@@ -454,7 +454,7 @@ async function _handleQuestion(
 
 async function confirmChatToolExecution(
 	reasons: ApprovalReason[],
-	_sql: string,
+	operation: string,
 	config: ReturnType<typeof loadConfig>,
 	options: ChatOptions,
 ): Promise<boolean> {
@@ -462,11 +462,12 @@ async function confirmChatToolExecution(
 	if (options.noConfirm && safetyLevel !== "strict") return true;
 
 	printApprovalWarning(reasons);
+	printInfo(`Operation: ${operation}`);
 	const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([
 		{
 			type: "confirm",
 			name: "confirmed",
-			message: "Execute this query?",
+			message: "Approve this operation?",
 			default: false,
 		},
 	]);

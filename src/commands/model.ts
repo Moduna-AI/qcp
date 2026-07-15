@@ -104,7 +104,7 @@ export async function modelInteractiveCommand(): Promise<void> {
 
 	const { provider } = await inquirer.prompt<{ provider: ProviderName }>([
 		{
-			type: "list",
+			type: "select",
 			name: "provider",
 			message: "Select a provider:",
 			default: config.provider,
@@ -117,7 +117,7 @@ export async function modelInteractiveCommand(): Promise<void> {
 
 	const { model } = await inquirer.prompt<{ model: string }>([
 		{
-			type: "list",
+			type: "select",
 			name: "model",
 			message: "Select a model:",
 			default:

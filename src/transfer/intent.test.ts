@@ -23,6 +23,14 @@ describe("transfer intent detection", () => {
 		expect(intent?.filePath).toBeUndefined();
 	});
 
+	test("prefers an explicit database import over a preceding download", () => {
+		const intent = detectTransferIntent(
+			"Download chinook.zip with curl and import it into the chinook connection.",
+		);
+
+		expect(intent?.direction).toBe("import");
+	});
+
 	test("appends explicit import file path HITL instruction", () => {
 		expect(
 			appendTransferFilePathInstruction("import my data", "./customers.csv"),

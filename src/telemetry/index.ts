@@ -35,8 +35,27 @@ export function initTelemetry(
 
 export async function shutdownTelemetry(): Promise<void> {
 	if (_client) {
-		await _client.shutdown();
+		await shutdownPostHogSilently(_client);
 		_client = null;
+	}
+}
+
+/**
+ * PostHog logs network failures directly with console.error even when its error
+ * event is handled. Telemetry is best-effort, so a failed flush must never add
+ * an error stack after a successful qcp command.
+ */
+export async function shutdownPostHogSilently(
+	client: Pick<PostHog, "shutdown">,
+): Promise<void> {
+	const originalConsoleError = console.error;
+	console.error = () => {};
+	try {
+		await client.shutdown();
+	} catch {
+		// Telemetry failures never change command success or user-visible output.
+	} finally {
+		console.error = originalConsoleError;
 	}
 }
 

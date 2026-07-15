@@ -310,7 +310,7 @@ async function promptForTransferFormat(
 		format: ReturnType<typeof supportedTransferFormatChoices>[number];
 	}>([
 		{
-			type: "list",
+			type: "select",
 			name: "format",
 			message: `Select ${direction} file format`,
 			choices: choices.map((choice) => ({ name: choice, value: choice })),
@@ -350,7 +350,7 @@ function shouldPromptForSemanticEnrichment(options: AskOptions): boolean {
 
 async function confirmAskToolExecution(
 	reasons: ApprovalReason[],
-	_sql: string,
+	operation: string,
 	config: ReturnType<typeof loadConfig>,
 	options: AskOptions,
 ): Promise<boolean> {
@@ -358,11 +358,12 @@ async function confirmAskToolExecution(
 	if (options.noConfirm && safetyLevel !== "strict") return true;
 
 	printApprovalWarning(reasons);
+	printInfo(`Operation: ${operation}`);
 	const { confirmed } = await inquirer.prompt<{ confirmed: boolean }>([
 		{
 			type: "confirm",
 			name: "confirmed",
-			message: "Execute this query?",
+			message: "Approve this operation?",
 			default: false,
 		},
 	]);

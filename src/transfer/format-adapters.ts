@@ -1,12 +1,12 @@
 import { Buffer } from "node:buffer";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { pathToFileURL } from "node:url";
 import {
 	importPackageFromStore,
 	type PackageGroup,
 	requirePackageGroup,
 } from "@/packages/lazy-packages.js";
+import { createLocalSqliteClient } from "@/sqlite-client.js";
 import type {
 	DatabaseTransferDirection,
 	DatabaseTransferFormat,
@@ -118,23 +118,6 @@ interface ParquetModule {
 	readonly ParquetReader: {
 		openFile(filePath: string): Promise<ParquetReaderLike>;
 	};
-}
-
-interface LibsqlResult {
-	readonly rows: readonly Record<string, unknown>[];
-}
-
-interface LibsqlClient {
-	execute(
-		statement:
-			| string
-			| { readonly sql: string; readonly args: readonly unknown[] },
-	): Promise<LibsqlResult>;
-	close(): void;
-}
-
-interface LibsqlModule {
-	createClient(options: { readonly url: string }): LibsqlClient;
 }
 
 interface PyodideFilesystem {
@@ -366,8 +349,7 @@ async function writeSqliteRows(
 	filePath: string,
 ): Promise<void> {
 	ensureParentDir(filePath);
-	const libsql = await importPackageFromStore<LibsqlModule>("@libsql/client");
-	const client = libsql.createClient({ url: pathToFileURL(filePath).href });
+	const client = await createLocalSqliteClient(filePath);
 	const columns = collectColumns(rows);
 	try {
 		await client.execute("DROP TABLE IF EXISTS qcp_export");
@@ -390,8 +372,7 @@ async function writeSqliteRows(
 }
 
 async function readSqliteRows(filePath: string): Promise<TransferImportRows> {
-	const libsql = await importPackageFromStore<LibsqlModule>("@libsql/client");
-	const client = libsql.createClient({ url: pathToFileURL(filePath).href });
+	const client = await createLocalSqliteClient(filePath);
 	try {
 		const tables = await client.execute(
 			"SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 1",

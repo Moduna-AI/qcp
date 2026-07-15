@@ -35,7 +35,9 @@ describe("qcp semantic command smoke tests", () => {
 		]);
 
 		expect(result.status).toBe(0);
-		expect(result.stdout).toContain("No semantic objects need enrichment");
+		expect(result.stdout).toContain("Objects queued: 4");
+		expect(result.stdout).toContain("Saved 0 semantic annotation(s)");
+		expect(result.stdout).toContain("Skipped: 4");
 		expect(existsSync(join(home, ".qcp", "semantic.db"))).toBe(true);
 	});
 

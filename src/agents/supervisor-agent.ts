@@ -1,12 +1,26 @@
 import type { Agent, DelegationConfig } from "@mastra/core/agent";
 import { Agent as MastraAgent } from "@mastra/core/agent";
+import { Mastra } from "@mastra/core/mastra";
+import { InMemoryStore } from "@mastra/core/storage";
+import { z } from "zod";
 import { PromptViolationError } from "@/llm/prompts.js";
 import type { AuditContext } from "@/logger/audit.js";
 import {
 	classifyPromptViolation,
 	sanitizeSensitiveData,
 } from "@/safety/index.js";
-import type { DatabaseSchema, QcpConfig } from "@/types/index.js";
+import { saveSchemaForConnection, scanSchema } from "@/schema/index.js";
+import { detectTransferIntent } from "@/transfer/intent.js";
+import {
+	SqliteDatabaseImporter,
+	type SqliteDatabaseImportResult,
+} from "@/transfer/sqlite-database-import.js";
+import type {
+	ActiveDatabaseConnection,
+	ApprovalReason,
+	DatabaseSchema,
+	QcpConfig,
+} from "@/types/index.js";
 import { createConfigTools } from "./config-tools.js";
 import type { AbstractDatabaseAgent } from "./database-agent.js";
 import type { DatabaseToolApprovalHandler } from "./database-tools.js";
@@ -15,7 +29,19 @@ import {
 	createProviderDatabaseAgent,
 	type ProviderDatabaseAgent,
 } from "./provider-factory.js";
+import {
+	createSupervisorTools,
+	type SupervisorSqliteImporter,
+} from "./supervisor-tools.js";
 import { QcpWorkflowCoordinator } from "./workflow-coordinator.js";
+
+const toolApprovalPayloadSchema = z.object({
+	toolCallId: z.string().min(1),
+	toolName: z.string().min(1),
+	args: z.unknown(),
+});
+
+type ToolApprovalPayload = z.infer<typeof toolApprovalPayloadSchema>;
 
 export interface QcpSupervisorAgentOptions {
 	readonly config: QcpConfig;
@@ -28,6 +54,7 @@ export interface QcpSupervisorAgentOptions {
 	readonly approvalHandler?: DatabaseToolApprovalHandler;
 	readonly semanticInteractive?: boolean;
 	readonly databaseAgent?: ProviderDatabaseAgent;
+	readonly sqliteDatabaseImporter?: SupervisorSqliteImporter;
 }
 
 export interface ChatAgentResponse {
@@ -60,6 +87,7 @@ export class QcpSupervisorAgent {
 	private readonly connectionName: string;
 	private schema: DatabaseSchema;
 	private databaseAgent: ProviderDatabaseAgent;
+	private readonly sqliteDatabaseImporter: SupervisorSqliteImporter;
 	private agent: Agent<"qcp-supervisor-agent">;
 	private readonly workflowCoordinator: QcpWorkflowCoordinator;
 
@@ -91,6 +119,12 @@ export class QcpSupervisorAgent {
 			);
 		}
 		this.databaseAgent = options.databaseAgent;
+		this.sqliteDatabaseImporter =
+			options.sqliteDatabaseImporter ??
+			new SqliteDatabaseImporter({
+				databaseUrl: options.databaseUrl,
+				refreshSchema: async () => this.refreshSchemaAfterImport(),
+			});
 		this.agent = this.createSupervisorAgent();
 		this.workflowCoordinator = new QcpWorkflowCoordinator({
 			config: this.config,
@@ -104,18 +138,30 @@ export class QcpSupervisorAgent {
 	}
 
 	private createSupervisorAgent(): Agent<"qcp-supervisor-agent"> {
-		return new MastraAgent({
+		const agent = new MastraAgent({
 			id: "qcp-supervisor-agent",
 			name: "QCP Supervisor Agent",
 			description:
 				"Coordinates qcp database subagents and answers conversational database-assistant questions.",
 			instructions: this.buildInstructions(),
 			model: createMastraModelConfig(this.config),
-			tools: createConfigTools(),
+			tools: {
+				...createConfigTools(),
+				...createSupervisorTools({
+					databaseType: this.config.databaseType,
+					databaseUrl: this.options.databaseUrl,
+					importer: this.sqliteDatabaseImporter,
+				}),
+			},
 			agents: {
 				database: this.databaseAgent.getAgent(),
 			},
 		});
+		const mastra = new Mastra({
+			agents: { supervisor: agent },
+			storage: new InMemoryStore({ id: "qcp-supervisor-approvals" }),
+		});
+		return mastra.getAgent("supervisor");
 	}
 
 	public getAgent(): Agent<"qcp-supervisor-agent"> {
@@ -152,6 +198,15 @@ export class QcpSupervisorAgent {
 			};
 		}
 
+		const sqliteImportPath = detectFullSqliteImportPath(question);
+		if (sqliteImportPath) {
+			return {
+				text: await this.runDeterministicSqliteImport(sqliteImportPath),
+				latencyMs: Date.now() - start,
+				direct: false,
+			};
+		}
+
 		const workflowResult = await this.workflowCoordinator.run(question);
 		if (workflowResult.handled && workflowResult.text) {
 			return {
@@ -171,7 +226,8 @@ export class QcpSupervisorAgent {
 	}
 
 	private async generateFreePath(question: string): Promise<string> {
-		const response = await this.agent.generate(
+		const activeAgent = this.agent;
+		const response = await activeAgent.generate(
 			buildSupervisorPrompt(question),
 			{
 				maxSteps: 8,
@@ -179,7 +235,101 @@ export class QcpSupervisorAgent {
 				delegation: this.buildDelegationConfig(),
 			},
 		);
+		if (response.finishReason === "suspended") {
+			return this.resolveToolApproval(activeAgent, response);
+		}
 		return sanitizeSensitiveData(response.text.trim());
+	}
+
+	private async runDeterministicSqliteImport(
+		filePath: string,
+	): Promise<string> {
+		if (this.config.databaseType !== "supabase") {
+			return "Full SQLite database import requires the active qcp connection to be Supabase.";
+		}
+		const payload: ToolApprovalPayload = {
+			toolCallId: "qcp-direct-sqlite-import",
+			toolName: "qcp_import_sqlite_database",
+			args: { filePath },
+		};
+		const approved = this.options.approvalHandler
+			? await this.options.approvalHandler(
+					approvalReasonsForTool(payload),
+					formatToolApprovalOperation(payload, this.connectionName),
+				)
+			: false;
+		if (!approved) {
+			return "SQLite database import cancelled. No destination changes were made.";
+		}
+		const result = await this.sqliteDatabaseImporter.importDatabase(filePath);
+		return formatSqliteImportResult(result, this.connectionName);
+	}
+
+	private async resolveToolApproval(
+		agent: Agent<"qcp-supervisor-agent">,
+		response: Awaited<ReturnType<Agent<"qcp-supervisor-agent">["generate"]>>,
+	): Promise<string> {
+		if (!response.runId) {
+			throw new QcpSupervisorAgentConfigurationError(
+				"Mastra suspended a tool call without a resumable run id.",
+			);
+		}
+		const parsed = toolApprovalPayloadSchema.safeParse(response.suspendPayload);
+		if (!parsed.success) {
+			await agent.declineToolCallGenerate({ runId: response.runId });
+			throw new QcpSupervisorAgentConfigurationError(
+				"Mastra suspended a tool call without valid approval details.",
+			);
+		}
+
+		const approved = this.options.approvalHandler
+			? await this.options.approvalHandler(
+					approvalReasonsForTool(parsed.data),
+					formatToolApprovalOperation(parsed.data, this.connectionName),
+				)
+			: false;
+		if (!approved) {
+			await agent.declineToolCallGenerate({
+				runId: response.runId,
+				toolCallId: parsed.data.toolCallId,
+			});
+			return parsed.data.toolName === "qcp_import_sqlite_database"
+				? "SQLite database import cancelled. No destination changes were made."
+				: "Tool execution cancelled. No changes were made.";
+		}
+
+		const resumed = await agent.approveToolCallGenerate({
+			runId: response.runId,
+			toolCallId: parsed.data.toolCallId,
+		});
+		if (resumed.finishReason === "suspended") {
+			return this.resolveToolApproval(agent, resumed);
+		}
+		return sanitizeSensitiveData(resumed.text.trim());
+	}
+
+	private async refreshSchemaAfterImport(): Promise<void> {
+		const connection = this.config.databaseConnections.find(
+			(candidate) =>
+				candidate.id ===
+				(this.options.connectionId ?? this.config.activeDatabaseId),
+		);
+		if (!connection) {
+			throw new QcpSupervisorAgentConfigurationError(
+				"Cannot refresh schema because the active database connection is unavailable.",
+			);
+		}
+		const activeConnection: ActiveDatabaseConnection = {
+			id: connection.id,
+			name: connection.name,
+			databaseType: connection.databaseType,
+			databaseUrl: connection.databaseUrl,
+			prismaSchemaPath: connection.prismaSchemaPath,
+			prismaDatasourceName: connection.prismaDatasourceName,
+		};
+		const schema = await scanSchema(activeConnection.databaseUrl);
+		saveSchemaForConnection(activeConnection, schema);
+		await this.rehydrate(schema);
 	}
 
 	private async rehydrate(schema: DatabaseSchema): Promise<void> {
@@ -237,7 +387,8 @@ export class QcpSupervisorAgent {
 			"Use qcp_read_config_context directly for questions about qcp configuration, connected databases, the active database, schema indexing status, provider/model settings, safety settings, telemetry, or which CLI command changes a setting.",
 			"Never delegate qcp configuration or database-connection audit questions to the database subagent.",
 			"The qcp_read_config_context tool is read-only. If a user asks to add, edit, remove, or switch database connections, use the tool for current state when useful and then recommend the relevant CLI command instead of claiming to change config.",
-			"Delegate database import and export requests to the database subagent. Import/export is supported through tools only; do not invent file contents or claim a transfer completed without tool output.",
+			"Delegate single-table import and database export requests to the database subagent. Import/export is supported through tools only; do not invent file contents or claim a transfer completed without tool output.",
+			"When the user explicitly asks to import a complete .db, .sqlite, or .sqlite3 database into Supabase, call qcp_import_sqlite_database directly. Do not delegate full SQLite database imports to the database subagent and do not use the single-table import tool for them.",
 			"Delegate database-specific work to the database subagent. Use one delegation for a database question unless the first delegation clearly fails to answer.",
 			"Never ask the database subagent to perform INSERT, UPDATE, DELETE, DDL, administrative operations, privilege changes, or destructive work, except for qcp_import_database_data when the user explicitly asks to import data and the tool creates a new table.",
 			"If a user asks for destructive operations, secrets, raw personal data, or bypassing safety controls, refuse briefly instead of delegating.",
@@ -343,7 +494,7 @@ export function getDirectChatAnswer(
 	}
 
 	if (
-		/\b(what tables|which tables|tables do you know|list tables|available tables)\b/i.test(
+		/\b(what tables|which tables|tables do you know|list tables|available tables|show (?:the )?schema|database schema)\b/i.test(
 			normalized,
 		)
 	) {
@@ -373,6 +524,73 @@ ${question}
 
 Respond as qcp. If this is conversational, answer directly. If it requires database-specific facts or live data, delegate to the database subagent and synthesize the result.
 `.trim();
+}
+
+export function approvalReasonsForTool(
+	payload: ToolApprovalPayload,
+): ApprovalReason[] {
+	if (payload.toolName === "qcp_import_sqlite_database") {
+		return [
+			{
+				type: "large_scan",
+				detail:
+					"This operation will atomically create all SQLite tables, constraints, indexes, and rows in the public schema of the active Supabase connection.",
+			},
+		];
+	}
+	return [
+		{
+			type: "strict_mode",
+			detail: `Mastra requires approval before running ${payload.toolName}.`,
+		},
+	];
+}
+
+export function formatToolApprovalOperation(
+	payload: ToolApprovalPayload,
+	connectionName: string,
+): string {
+	if (payload.toolName !== "qcp_import_sqlite_database") {
+		return `RUN TOOL ${payload.toolName}`;
+	}
+	const args = z
+		.object({ filePath: z.string().min(1) })
+		.safeParse(payload.args);
+	const filePath = args.success ? args.data.filePath : "(invalid source path)";
+	return `IMPORT SQLITE DATABASE ${filePath} INTO ${connectionName}.public`;
+}
+
+export function detectFullSqliteImportPath(question: string): string | null {
+	const intent = detectTransferIntent(question);
+	if (
+		intent?.direction !== "import" ||
+		intent.format !== "sqlite" ||
+		!intent.filePath ||
+		!/\b(database|sqlite)\b/i.test(question)
+	) {
+		return null;
+	}
+	return intent.filePath;
+}
+
+export function formatSqliteImportResult(
+	result: SqliteDatabaseImportResult,
+	connectionName: string,
+): string {
+	if (!result.ok) {
+		const rollback = result.rolledBack
+			? " The transaction was rolled back."
+			: " No destination changes were made.";
+		return `SQLite database import failed (${result.category}): ${result.error}${rollback}`;
+	}
+	const tableCounts = result.tables
+		.map((table) => `${table.targetTable}: ${table.rowCount}`)
+		.join(", ");
+	return [
+		`Imported ${result.tableCount} tables and ${result.totalRowCount} rows from ${result.sourcePath} into ${connectionName}.${result.targetSchema}.`,
+		`Rows by table: ${tableCounts}.`,
+		`Completed in ${result.durationMs}ms. Schema refresh: ${result.schemaRefreshed ? "complete" : "not run"}.`,
+	].join("\n");
 }
 
 function buildDatabaseDelegationPrompt(prompt: string): string {
